@@ -9,7 +9,7 @@ const workflow: Workflow = {
 }
 
 function context(userId: string, permissions: AuthenticatedContext['permissions']): AuthenticatedContext {
-  return { user: { id: userId, organizationId: 'org-1', displayName: 'Test User', email: 'test@example.com', role: 'operator' }, expiresAt: '2026-09-03T00:00:00.000Z', permissions }
+  return { user: { id: userId, organizationId: 'org-1', organizationName: 'Acme', displayName: 'Test User', email: 'test@example.com', role: 'operator' }, expiresAt: '2026-09-03T00:00:00.000Z', permissions }
 }
 
 describe('workflow mutation policy', () => {
