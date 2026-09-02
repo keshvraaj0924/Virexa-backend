@@ -6,14 +6,10 @@ import helmet from '@fastify/helmet'
 import { z } from 'zod'
 import { apiFailure, apiSuccess } from './contracts/http.js'
 import type { AuthSession, LoginRequest, RegisterRequest } from './contracts/auth.js'
-import { createAuthRepository } from './auth/repository.js'
+import { createAuthRepository, type AuthRepository } from './auth/repository.js'
 import { assertTrustedOrigin } from './auth/origin-guard.js'
 
-const app = Fastify({
-  logger: true,
-  requestIdHeader: 'x-request-id',
-  genReqId: () => randomUUID(),
-})
+const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
 
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
@@ -34,14 +30,16 @@ const loginSchema = z.object({
   password: z.string().min(1).max(128),
 }).strict()
 
-function authRepository() {
+let repository: AuthRepository | undefined
+function authRepository(): AuthRepository {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) {
     const error = new Error('DATABASE_URL is not configured')
     error.name = 'DEPENDENCY_UNAVAILABLE'
     throw error
   }
-  return createAuthRepository(databaseUrl)
+  repository ??= createAuthRepository(databaseUrl)
+  return repository
 }
 
 function sessionCookieOptions() {
@@ -73,7 +71,6 @@ app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, rep
   if (!parsed.success) {
     return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Registration data is invalid.', request.id, parsed.error.flatten().fieldErrors))
   }
-
   try {
     const result = await authRepository().register(parsed.data)
     const session: AuthSession = { user: result.user, expiresAt: result.expiresAt }
@@ -93,12 +90,8 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) =>
   if (!parsed.success) {
     return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id, parsed.error.flatten().fieldErrors))
   }
-
   const result = await authRepository().login(parsed.data.email, parsed.data.password)
-  if (!result) {
-    return reply.code(401).send(apiFailure('INVALID_CREDENTIALS', 'Email or password is incorrect.', request.id))
-  }
-
+  if (!result) return reply.code(401).send(apiFailure('INVALID_CREDENTIALS', 'Email or password is incorrect.', request.id))
   const session: AuthSession = { user: result.user, expiresAt: result.expiresAt }
   reply.setCookie('virexa_session', result.sessionToken, sessionCookieOptions())
   return reply.send(apiSuccess(session, request.id))
@@ -106,10 +99,7 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) =>
 
 app.get('/api/v1/auth/session', async (request, reply) => {
   const token = request.cookies.virexa_session
-  if (!token) {
-    return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
-  }
-
+  if (!token) return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
   const session = await authRepository().getSession(token)
   if (!session) {
     reply.clearCookie('virexa_session', { path: '/' })
@@ -121,7 +111,7 @@ app.get('/api/v1/auth/session', async (request, reply) => {
 app.post('/api/v1/auth/logout', async (request, reply) => {
   assertTrustedOrigin(request)
   const token = request.cookies.virexa_session
-  if (token && process.env.DATABASE_URL) await authRepository().revokeSession(token)
+  if (token) await authRepository().revokeSession(token)
   reply.clearCookie('virexa_session', { path: '/' })
   return reply.send(apiSuccess({ success: true }, request.id))
 })
