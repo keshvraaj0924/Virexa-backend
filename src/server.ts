@@ -159,8 +159,14 @@ app.patch<{ Params: { workflowId: string }; Body: UpdateWorkflowRequest }>('/api
   if (parsed.data.status && !canTransitionWorkflowStatus(existing.status, parsed.data.status)) {
     return reply.code(409).send(apiFailure('INVALID_STATE_TRANSITION', `Workflow cannot transition from ${existing.status} to ${parsed.data.status}.`, request.id))
   }
-  const workflow = await workflows().update(context.user.organizationId, existing.id, parsed.data)
-  if (!workflow) return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
+  const workflow = await workflows().update(context.user.organizationId, existing.id, parsed.data, parsed.data.status ? existing.status : undefined)
+  if (!workflow) {
+    const current = await workflows().getById(context.user.organizationId, existing.id)
+    if (current && parsed.data.status && current.status !== existing.status) {
+      return reply.code(409).send(apiFailure('WORKFLOW_CONFLICT', `Workflow changed before this update could be applied; current status is ${current.status}.`, request.id))
+    }
+    return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
+  }
   await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.updated', resourceType: 'workflow', resourceId: workflow.id, requestId: request.id, metadata: { status: workflow.status } })
   return reply.send(apiSuccess(workflow, request.id))
 })

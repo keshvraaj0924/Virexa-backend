@@ -5,7 +5,7 @@ export interface WorkflowRepository {
   create(organizationId: string, userId: string, input: CreateWorkflowRequest): Promise<Workflow>
   list(organizationId: string, limit: number): Promise<Workflow[]>
   getById(organizationId: string, workflowId: string): Promise<Workflow | null>
-  update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest): Promise<Workflow | null>
+  update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus): Promise<Workflow | null>
 }
 
 function mapWorkflow(row: any): Workflow {
@@ -28,7 +28,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const result = await this.pool.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 AND id = $2`, [organizationId, workflowId])
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
   }
-  async update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest) {
+  async update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus) {
     const fields: string[] = []
     const values: unknown[] = [organizationId, workflowId]
     if (input.name !== undefined) { values.push(input.name.trim()); fields.push(`name = $${values.length}`) }
@@ -36,7 +36,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     if (input.status !== undefined) { values.push(input.status); fields.push(`status = $${values.length}`) }
     if (fields.length === 0) return this.getById(organizationId, workflowId)
     fields.push('updated_at = now()')
-    const result = await this.pool.query(`UPDATE workflows SET ${fields.join(', ')} WHERE organization_id = $1 AND id = $2 RETURNING ${columns}`, values)
+    const statusPredicate = expectedStatus === undefined ? '' : ` AND status = $${values.push(expectedStatus)}`
+    const result = await this.pool.query(`UPDATE workflows SET ${fields.join(', ')} WHERE organization_id = $1 AND id = $2${statusPredicate} RETURNING ${columns}`, values)
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
   }
 }
