@@ -7,12 +7,13 @@ import { Pool } from 'pg'
 import { z } from 'zod'
 import { apiFailure, apiSuccess } from './contracts/http.js'
 import type { AuthSession, LoginRequest, RegisterRequest } from './contracts/auth.js'
-import type { CreateWorkflowRequest } from './contracts/workflows.js'
+import type { CreateWorkflowRequest, UpdateWorkflowRequest } from './contracts/workflows.js'
 import { createAuthRepository, type AuthRepository } from './auth/repository.js'
 import { assertTrustedOrigin } from './auth/origin-guard.js'
 import { requireAuthenticated, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
 import { AuditService } from './audit/service.js'
 import { PostgresWorkflowRepository } from './workflows/repository.js'
+import { canManageWorkflow } from './workflows/policy.js'
 
 const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
 await app.register(helmet, { contentSecurityPolicy: false })
@@ -25,6 +26,7 @@ const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(10
 const workflowQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict()
 const workflowIdSchema = z.string().uuid()
 const createWorkflowSchema = z.object({ name: z.string().trim().min(1).max(160), description: z.string().trim().max(4000).nullable().optional() }).strict()
+const updateWorkflowSchema = z.object({ name: z.string().trim().min(1).max(160).optional(), description: z.string().trim().max(4000).nullable().optional(), status: z.enum(['draft', 'active', 'paused', 'archived']).optional() }).strict().refine((value) => Object.keys(value).length > 0, { message: 'At least one workflow field must be provided.' })
 
 let repository: AuthRepository | undefined
 let auditService: AuditService | undefined
@@ -141,6 +143,23 @@ app.get<{ Params: { workflowId: string } }>('/api/v1/workflows/:workflowId', asy
   if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Workflow ID is invalid.', request.id))
   const workflow = await workflows().getById(context.user.organizationId, parsedId.data)
   if (!workflow) return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
+  return reply.send(apiSuccess(workflow, request.id))
+})
+
+app.patch<{ Params: { workflowId: string }; Body: UpdateWorkflowRequest }>('/api/v1/workflows/:workflowId', async (request, reply) => {
+  assertTrustedOrigin(request)
+  const context = await requireAuthenticated(request, authRepository())
+  requirePermission(context, 'workflow:create')
+  const parsedId = workflowIdSchema.safeParse(request.params.workflowId)
+  if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Workflow ID is invalid.', request.id))
+  const parsed = updateWorkflowSchema.safeParse(request.body)
+  if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Workflow update data is invalid.', request.id, parsed.error.flatten().fieldErrors))
+  const existing = await workflows().getById(context.user.organizationId, parsedId.data)
+  if (!existing) return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
+  if (!canManageWorkflow(context, existing)) return reply.code(403).send(apiFailure('FORBIDDEN', 'You cannot modify this workflow.', request.id))
+  const workflow = await workflows().update(context.user.organizationId, existing.id, parsed.data)
+  if (!workflow) return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
+  await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.updated', resourceType: 'workflow', resourceId: workflow.id, requestId: request.id, metadata: { status: workflow.status } })
   return reply.send(apiSuccess(workflow, request.id))
 })
 
