@@ -31,6 +31,6 @@ describe('PostgresWorkflowRepository', () => {
     const row = { id: 'workflow-a', organization_id: 'org-a', created_by_user_id: 'user-a', name: 'Updated', description: null, status: 'active', created_at: new Date(), updated_at: new Date() }
     const pool = poolWithRows([row])
     await new PostgresWorkflowRepository(pool).update('org-a', 'workflow-a', { status: 'active' }, 'draft')
-    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('AND status = $5'), ['org-a', 'workflow-a', 'active', 'draft'])
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('AND status = $4'), ['org-a', 'workflow-a', 'active', 'draft'])
   })
 })
