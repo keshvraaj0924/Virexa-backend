@@ -21,6 +21,7 @@ export type ApiErrorCode =
   | 'INVALID_CREDENTIALS'
   | 'INVALID_STATE_TRANSITION'
   | 'WORKFLOW_CONFLICT'
+  | 'IDEMPOTENCY_KEY_REUSED'
 
 export interface UserSummary {
   id: string
