@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/**/*.test.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.0",
@@ -22,6 +22,7 @@
     "@types/node": "^22.10.0",
     "@types/pg": "^8.15.5",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }
