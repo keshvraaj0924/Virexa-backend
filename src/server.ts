@@ -8,6 +8,7 @@ import { apiFailure, apiSuccess } from './contracts/http.js'
 import type { AuthSession, LoginRequest, RegisterRequest } from './contracts/auth.js'
 import { createAuthRepository, type AuthRepository } from './auth/repository.js'
 import { assertTrustedOrigin } from './auth/origin-guard.js'
+import { requireAuthenticated, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
 
 const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
 
@@ -59,6 +60,12 @@ app.setErrorHandler((error, request, reply) => {
   if (error.name === 'DEPENDENCY_UNAVAILABLE') {
     return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'Authentication persistence is unavailable.', request.id))
   }
+  if (error instanceof AuthenticationRequiredError) {
+    return reply.code(401).send(apiFailure('UNAUTHENTICATED', error.message, request.id))
+  }
+  if (error instanceof PermissionDeniedError) {
+    return reply.code(403).send(apiFailure('FORBIDDEN', error.message, request.id))
+  }
   request.log.error({ err: error }, 'Unhandled request error')
   return reply.code(500).send(apiFailure('INTERNAL_ERROR', 'An unexpected error occurred.', request.id))
 })
@@ -88,7 +95,7 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) =>
   assertTrustedOrigin(request)
   const parsed = loginSchema.safeParse(request.body)
   if (!parsed.success) {
-    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id, parsed.error.flatten().fieldErrors))
+    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id))
   }
   const result = await authRepository().login(parsed.data.email, parsed.data.password)
   if (!result) return reply.code(401).send(apiFailure('INVALID_CREDENTIALS', 'Email or password is incorrect.', request.id))
@@ -114,6 +121,12 @@ app.post('/api/v1/auth/logout', async (request, reply) => {
   if (token) await authRepository().revokeSession(token)
   reply.clearCookie('virexa_session', { path: '/' })
   return reply.send(apiSuccess({ success: true }, request.id))
+})
+
+app.get('/api/v1/me', async (request, reply) => {
+  const context = await requireAuthenticated(request, authRepository())
+  requirePermission(context, 'platform:read')
+  return reply.send(apiSuccess(context, request.id))
 })
 
 const port = Number(process.env.PORT ?? 4000)
