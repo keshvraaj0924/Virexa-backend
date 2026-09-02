@@ -13,7 +13,7 @@ import { assertTrustedOrigin } from './auth/origin-guard.js'
 import { requireAuthenticated, requireAnyPermission, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
 import { AuditService } from './audit/service.js'
 import { PostgresWorkflowRepository } from './workflows/repository.js'
-import { canManageWorkflow } from './workflows/policy.js'
+import { canManageWorkflow, canTransitionWorkflowStatus } from './workflows/policy.js'
 
 const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
 await app.register(helmet, { contentSecurityPolicy: false })
@@ -156,6 +156,9 @@ app.patch<{ Params: { workflowId: string }; Body: UpdateWorkflowRequest }>('/api
   const existing = await workflows().getById(context.user.organizationId, parsedId.data)
   if (!existing) return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
   if (!canManageWorkflow(context, existing)) return reply.code(403).send(apiFailure('FORBIDDEN', 'You cannot modify this workflow.', request.id))
+  if (parsed.data.status && !canTransitionWorkflowStatus(existing.status, parsed.data.status)) {
+    return reply.code(409).send(apiFailure('INVALID_STATE_TRANSITION', `Workflow cannot transition from ${existing.status} to ${parsed.data.status}.`, request.id))
+  }
   const workflow = await workflows().update(context.user.organizationId, existing.id, parsed.data)
   if (!workflow) return reply.code(404).send(apiFailure('NOT_FOUND', 'Workflow was not found.', request.id))
   await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.updated', resourceType: 'workflow', resourceId: workflow.id, requestId: request.id, metadata: { status: workflow.status } })
