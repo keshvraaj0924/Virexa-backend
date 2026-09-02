@@ -18,4 +18,12 @@ describe('PostgresWorkflowRepository', () => {
     expect(workflow).toBeNull()
     expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('WHERE organization_id = $1 AND id = $2'), ['org-a', 'workflow-a'])
   })
+
+  it('scopes updates to the authenticated organization and writes only supplied fields', async () => {
+    const row = { id: 'workflow-a', organization_id: 'org-a', created_by_user_id: 'user-a', name: 'Updated', description: null, status: 'active', created_at: new Date(), updated_at: new Date() }
+    const pool = poolWithRows([row])
+    const workflow = await new PostgresWorkflowRepository(pool).update('org-a', 'workflow-a', { name: 'Updated', status: 'active' })
+    expect(workflow?.name).toBe('Updated')
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('WHERE organization_id = $1 AND id = $2'), ['org-a', 'workflow-a', 'Updated', 'active'])
+  })
 })
