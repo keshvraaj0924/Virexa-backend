@@ -1,11 +1,19 @@
+import { randomUUID } from 'node:crypto'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
+import { z } from 'zod'
 import { apiFailure, apiSuccess } from './contracts/http.js'
-import type { LoginRequest, RegisterRequest } from './contracts/auth.js'
+import type { AuthSession, LoginRequest, RegisterRequest } from './contracts/auth.js'
+import { createAuthRepository } from './auth/repository.js'
+import { assertTrustedOrigin } from './auth/origin-guard.js'
 
-const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => crypto.randomUUID() })
+const app = Fastify({
+  logger: true,
+  requestIdHeader: 'x-request-id',
+  genReqId: () => randomUUID(),
+})
 
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
@@ -14,35 +22,108 @@ await app.register(cors, {
   credentials: true,
 })
 
+const registerSchema = z.object({
+  displayName: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(320),
+  password: z.string().min(12).max(128),
+  organizationName: z.string().trim().min(2).max(160),
+}).strict()
+
+const loginSchema = z.object({
+  email: z.string().trim().email().max(320),
+  password: z.string().min(1).max(128),
+}).strict()
+
+function authRepository() {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) {
+    const error = new Error('DATABASE_URL is not configured')
+    error.name = 'DEPENDENCY_UNAVAILABLE'
+    throw error
+  }
+  return createAuthRepository(databaseUrl)
+}
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax' as const,
+    path: '/',
+    maxAge: 60 * 60 * 8,
+  }
+}
+
+app.setErrorHandler((error, request, reply) => {
+  if (error.name === 'UNTRUSTED_ORIGIN') {
+    return reply.code(403).send(apiFailure('UNTRUSTED_ORIGIN', 'Request origin is not trusted.', request.id))
+  }
+  if (error.name === 'DEPENDENCY_UNAVAILABLE') {
+    return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'Authentication persistence is unavailable.', request.id))
+  }
+  request.log.error({ err: error }, 'Unhandled request error')
+  return reply.code(500).send(apiFailure('INTERNAL_ERROR', 'An unexpected error occurred.', request.id))
+})
+
 app.get('/health', async (request) => apiSuccess({ status: 'ok' }, request.id))
 
 app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, reply) => {
-  const { displayName, email, password, organizationName } = request.body
-  if (!displayName || !email || !password || !organizationName) {
-    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Required registration fields are missing.', request.id))
+  assertTrustedOrigin(request)
+  const parsed = registerSchema.safeParse(request.body)
+  if (!parsed.success) {
+    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Registration data is invalid.', request.id, parsed.error.flatten().fieldErrors))
   }
-  if (password.length < 12) {
-    return reply.code(400).send(apiFailure('WEAK_PASSWORD', 'Password does not meet the minimum policy.', request.id, { password: ['Use at least 12 characters.'] }))
+
+  try {
+    const result = await authRepository().register(parsed.data)
+    const session: AuthSession = { user: result.user, expiresAt: result.expiresAt }
+    reply.setCookie('virexa_session', result.sessionToken, sessionCookieOptions())
+    return reply.code(201).send(apiSuccess(session, request.id))
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      return reply.code(409).send(apiFailure('EMAIL_ALREADY_REGISTERED', 'An account already exists for this organization and email.', request.id))
+    }
+    throw error
   }
-  // Persistence, password hashing, and session issuance will be added in the auth implementation slice.
-  return reply.code(501).send(apiFailure('NOT_IMPLEMENTED', 'Registration service is not enabled yet.', request.id))
 })
 
 app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) => {
-  const { email, password } = request.body
-  if (!email || !password) {
-    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id))
+  assertTrustedOrigin(request)
+  const parsed = loginSchema.safeParse(request.body)
+  if (!parsed.success) {
+    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id, parsed.error.flatten().fieldErrors))
   }
-  return reply.code(501).send(apiFailure('NOT_IMPLEMENTED', 'Authentication service is not enabled yet.', request.id))
+
+  const result = await authRepository().login(parsed.data.email, parsed.data.password)
+  if (!result) {
+    return reply.code(401).send(apiFailure('INVALID_CREDENTIALS', 'Email or password is incorrect.', request.id))
+  }
+
+  const session: AuthSession = { user: result.user, expiresAt: result.expiresAt }
+  reply.setCookie('virexa_session', result.sessionToken, sessionCookieOptions())
+  return reply.send(apiSuccess(session, request.id))
 })
 
 app.get('/api/v1/auth/session', async (request, reply) => {
-  return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
+  const token = request.cookies.virexa_session
+  if (!token) {
+    return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
+  }
+
+  const session = await authRepository().getSession(token)
+  if (!session) {
+    reply.clearCookie('virexa_session', { path: '/' })
+    return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
+  }
+  return reply.send(apiSuccess(session, request.id))
 })
 
 app.post('/api/v1/auth/logout', async (request, reply) => {
+  assertTrustedOrigin(request)
+  const token = request.cookies.virexa_session
+  if (token && process.env.DATABASE_URL) await authRepository().revokeSession(token)
   reply.clearCookie('virexa_session', { path: '/' })
-  return reply.code(204).send()
+  return reply.send(apiSuccess({ success: true }, request.id))
 })
 
 const port = Number(process.env.PORT ?? 4000)
