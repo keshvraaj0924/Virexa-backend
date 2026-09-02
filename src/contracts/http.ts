@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import type { ApiMeta, ApiErrorBody } from './auth'
+import type { ApiMeta, ApiErrorBody } from './auth.js'
 
-export function createApiMeta(requestId = randomUUID()): ApiMeta {
+export function createApiMeta(requestId: string = randomUUID()): ApiMeta {
   return { requestId, timestamp: new Date().toISOString() }
 }
 
