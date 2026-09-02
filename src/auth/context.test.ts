@@ -11,12 +11,13 @@ const context: AuthenticatedContext = {
     organizationName: 'Example Operations',
   },
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
-  permissions: ['platform:read', 'organization:manage'],
+  permissions: ['platform:read', 'organization:manage', 'audit:read'],
 }
 
 describe('authorization context', () => {
   it('allows permissions granted by the server-side role policy', () => {
     expect(requirePermission(context, 'organization:manage')).toBe(context)
+    expect(requirePermission(context, 'audit:read')).toBe(context)
   })
 
   it('rejects permissions not granted to the authenticated role', () => {
