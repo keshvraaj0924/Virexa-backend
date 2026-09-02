@@ -1,0 +1,50 @@
+import { readFile } from 'node:fs/promises'
+import { test, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { Pool } from 'pg'
+import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from '../src/workflows/repository.js'
+
+const databaseUrl = process.env.DATABASE_URL
+const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null
+
+before(async () => {
+  if (!pool) return
+  for (const migration of ['001_auth.sql', '002_audit_events.sql', '003_workflows.sql', '004_workflow_idempotency.sql']) {
+    await pool.query(await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'))
+  }
+})
+
+test('workflow creation is idempotent within a tenant and rejects key reuse with a different payload', { skip: !pool }, async () => {
+  const organization = await pool!.query("INSERT INTO organizations (name) VALUES ('idempotency-test') RETURNING id")
+  const organizationId = organization.rows[0].id as string
+  const user = await pool!.query(
+    "INSERT INTO users (organization_id, email, display_name, password_hash, role) VALUES ($1, $2, 'Idempotency Test', 'test-only-hash', 'admin') RETURNING id",
+    [organizationId, `${organizationId}@test.invalid`],
+  )
+  const userId = user.rows[0].id as string
+  const repository = new PostgresWorkflowRepository(pool!)
+  const key = 'workflow-create-idempotency-test-001'
+
+  try {
+    const first = await repository.createIdempotent(organizationId, userId, { name: 'Order intake' }, key)
+    const replay = await repository.createIdempotent(organizationId, userId, { name: 'Order intake' }, key)
+
+    assert.equal(first.replayed, false)
+    assert.equal(replay.replayed, true)
+    assert.equal(replay.workflow.id, first.workflow.id)
+
+    await assert.rejects(
+      repository.createIdempotent(organizationId, userId, { name: 'Different workflow' }, key),
+      (error: unknown) => error instanceof IdempotencyKeyReuseError,
+    )
+  } finally {
+    await pool!.query('DELETE FROM workflows WHERE organization_id = $1', [organizationId])
+    await pool!.query('DELETE FROM workflow_idempotency_keys WHERE organization_id = $1', [organizationId])
+    await pool!.query('DELETE FROM users WHERE organization_id = $1', [organizationId])
+    await pool!.query('DELETE FROM organizations WHERE id = $1', [organizationId])
+  }
+})
+
+after(async () => {
+  await pool?.end()
+})
