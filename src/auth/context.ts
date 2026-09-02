@@ -16,12 +16,12 @@ export class PermissionDeniedError extends Error {
   }
 }
 
-export type Permission = 'platform:read' | 'platform:manage' | 'organization:manage'
+export type Permission = 'platform:read' | 'platform:manage' | 'organization:manage' | 'audit:read'
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
-  super_admin: ['platform:read', 'platform:manage', 'organization:manage'],
-  admin: ['platform:read', 'organization:manage'],
-  manager: ['platform:read'],
+  super_admin: ['platform:read', 'platform:manage', 'organization:manage', 'audit:read'],
+  admin: ['platform:read', 'organization:manage', 'audit:read'],
+  manager: ['platform:read', 'audit:read'],
   operator: ['platform:read'],
   viewer: ['platform:read'],
 }
