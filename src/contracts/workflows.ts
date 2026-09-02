@@ -16,3 +16,9 @@ export interface CreateWorkflowRequest {
   name: string
   description?: string | null
 }
+
+export interface UpdateWorkflowRequest {
+  name?: string
+  description?: string | null
+  status?: WorkflowStatus
+}
