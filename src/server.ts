@@ -137,7 +137,7 @@ app.post<{ Body: CreateWorkflowRequest }>('/api/v1/workflows', async (request, r
   if (!parsedKey.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'A valid Idempotency-Key header is required.', request.id, { idempotencyKey: ['Use a 16-255 character unique key.'] }))
   const result = await workflows().createIdempotent(context.user.organizationId, context.user.id, parsed.data, parsedKey.data)
   if (!result.replayed) {
-    await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.created', resourceType: 'workflow', resourceId: result.workflow.id, requestId: request.id, metadata: { idempotencyKey: parsedKey.data } })
+    await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.created', resourceType: 'workflow', resourceId: result.workflow.id, requestId: request.id })
   }
   return reply.code(result.replayed ? 200 : 201).send(apiSuccess(result.workflow, request.id))
 })
