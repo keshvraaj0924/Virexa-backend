@@ -10,7 +10,7 @@ import type { AuthSession, LoginRequest, RegisterRequest } from './contracts/aut
 import type { CreateWorkflowRequest, UpdateWorkflowRequest } from './contracts/workflows.js'
 import { createAuthRepository, type AuthRepository } from './auth/repository.js'
 import { assertTrustedOrigin } from './auth/origin-guard.js'
-import { requireAuthenticated, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
+import { requireAuthenticated, requireAnyPermission, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
 import { AuditService } from './audit/service.js'
 import { PostgresWorkflowRepository } from './workflows/repository.js'
 import { canManageWorkflow } from './workflows/policy.js'
@@ -149,7 +149,7 @@ app.get<{ Params: { workflowId: string } }>('/api/v1/workflows/:workflowId', asy
 app.patch<{ Params: { workflowId: string }; Body: UpdateWorkflowRequest }>('/api/v1/workflows/:workflowId', async (request, reply) => {
   assertTrustedOrigin(request)
   const context = await requireAuthenticated(request, authRepository())
-  requirePermission(context, 'workflow:create')
+  requireAnyPermission(context, ['workflow:create', 'workflow:manage'])
   const parsedId = workflowIdSchema.safeParse(request.params.workflowId)
   if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Workflow ID is invalid.', request.id))
   const parsed = updateWorkflowSchema.safeParse(request.body)

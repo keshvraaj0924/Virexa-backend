@@ -1,6 +1,6 @@
 import type { FastifyRequest } from 'fastify'
 import type { AuthRepository } from './repository.js'
-import type { AuthSession, UserRole } from '../contracts/auth.js'
+import type { AuthenticatedContext, Permission, UserRole } from '../contracts/auth.js'
 
 export class AuthenticationRequiredError extends Error {
   constructor() { super('Authentication is required.'); this.name = 'UNAUTHENTICATED' }
@@ -9,7 +9,7 @@ export class PermissionDeniedError extends Error {
   constructor() { super('You do not have permission to perform this action.'); this.name = 'FORBIDDEN' }
 }
 
-export type Permission = 'platform:read' | 'platform:manage' | 'organization:manage' | 'audit:read' | 'workflow:read' | 'workflow:create' | 'workflow:manage'
+export { type AuthenticatedContext, type Permission }
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   super_admin: ['platform:read', 'platform:manage', 'organization:manage', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage'],
@@ -18,8 +18,6 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   operator: ['platform:read', 'workflow:read', 'workflow:create'],
   viewer: ['platform:read', 'workflow:read'],
 }
-
-export interface AuthenticatedContext extends AuthSession { permissions: readonly Permission[] }
 
 export async function requireAuthenticated(request: FastifyRequest, repository: AuthRepository): Promise<AuthenticatedContext> {
   const token = request.cookies.virexa_session
@@ -31,5 +29,10 @@ export async function requireAuthenticated(request: FastifyRequest, repository: 
 
 export function requirePermission(context: AuthenticatedContext, permission: Permission): AuthenticatedContext {
   if (!context.permissions.includes(permission)) throw new PermissionDeniedError()
+  return context
+}
+
+export function requireAnyPermission(context: AuthenticatedContext, permissions: readonly Permission[]): AuthenticatedContext {
+  if (!permissions.some((permission) => context.permissions.includes(permission))) throw new PermissionDeniedError()
   return context
 }

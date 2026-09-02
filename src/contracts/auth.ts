@@ -1,5 +1,14 @@
 export type UserRole = 'super_admin' | 'admin' | 'manager' | 'operator' | 'viewer'
 
+export type Permission =
+  | 'platform:read'
+  | 'platform:manage'
+  | 'organization:manage'
+  | 'audit:read'
+  | 'workflow:read'
+  | 'workflow:create'
+  | 'workflow:manage'
+
 export interface UserSummary {
   id: string
   email: string
@@ -12,6 +21,10 @@ export interface UserSummary {
 export interface AuthSession {
   user: UserSummary
   expiresAt: string
+}
+
+export interface AuthenticatedContext extends AuthSession {
+  permissions: readonly Permission[]
 }
 
 export interface LoginRequest {
