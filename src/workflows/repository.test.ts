@@ -26,4 +26,11 @@ describe('PostgresWorkflowRepository', () => {
     expect(workflow?.name).toBe('Updated')
     expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('WHERE organization_id = $1 AND id = $2'), ['org-a', 'workflow-a', 'Updated', 'active'])
   })
+
+  it('uses the current status as an optimistic concurrency guard for lifecycle updates', async () => {
+    const row = { id: 'workflow-a', organization_id: 'org-a', created_by_user_id: 'user-a', name: 'Updated', description: null, status: 'active', created_at: new Date(), updated_at: new Date() }
+    const pool = poolWithRows([row])
+    await new PostgresWorkflowRepository(pool).update('org-a', 'workflow-a', { status: 'active' }, 'draft')
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('AND status = $5'), ['org-a', 'workflow-a', 'active', 'draft'])
+  })
 })
