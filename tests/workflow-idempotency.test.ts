@@ -38,8 +38,8 @@ test('workflow creation is idempotent within a tenant and rejects key reuse with
       (error: unknown) => error instanceof IdempotencyKeyReuseError,
     )
   } finally {
-    await pool!.query('DELETE FROM workflows WHERE organization_id = $1', [organizationId])
     await pool!.query('DELETE FROM workflow_idempotency_keys WHERE organization_id = $1', [organizationId])
+    await pool!.query('DELETE FROM workflows WHERE organization_id = $1', [organizationId])
     await pool!.query('DELETE FROM users WHERE organization_id = $1', [organizationId])
     await pool!.query('DELETE FROM organizations WHERE id = $1', [organizationId])
   }
