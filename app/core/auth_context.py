@@ -5,10 +5,9 @@ from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authentication import AuthenticationService
+from app.core.config import get_settings
 from app.core.rbac import Permission, Role, has_permission
 from app.db.base import get_db_session
-from app.db.models import User
-from app.core.config import get_settings
 
 
 @dataclass(frozen=True)
@@ -32,8 +31,7 @@ async def get_auth_context(
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
 
-    user: User
-    _, user = resolved
+    user, _ = resolved
     try:
         role = Role(user.role)
     except ValueError as exc:
