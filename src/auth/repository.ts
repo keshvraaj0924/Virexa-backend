@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { Pool, type PoolClient } from 'pg'
+import { Pool } from 'pg'
 import type { AuthSession, UserSummary, UserRole } from '../contracts/auth.js'
 import { createSessionToken, hashPassword, verifyPassword } from './crypto.js'
 
@@ -32,10 +32,7 @@ export class PostgresAuthRepository implements AuthRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      const organization = await client.query<{ id: string; name: string }>(
-        'INSERT INTO organizations (name) VALUES ($1) RETURNING id, name',
-        [input.organizationName.trim()],
-      )
+      const organization = await client.query<{ id: string; name: string }>('INSERT INTO organizations (name) VALUES ($1) RETURNING id, name', [input.organizationName.trim()])
       const passwordHash = await hashPassword(input.password)
       const user = await client.query(
         `INSERT INTO users (organization_id, email, display_name, password_hash, role)
@@ -70,7 +67,6 @@ export class PostgresAuthRepository implements AuthRepository {
     )
     const row = result.rows[0]
     if (!row || !(await verifyPassword(password, row.password_hash))) return null
-
     const token = createSessionToken()
     const session = await this.pool.query(
       `INSERT INTO sessions (user_id, token_digest, expires_at)
@@ -84,23 +80,16 @@ export class PostgresAuthRepository implements AuthRepository {
     const result = await this.pool.query(
       `SELECT u.id AS user_id, u.email, u.display_name, u.role,
               o.id AS organization_id, o.name AS organization_name, s.expires_at
-       FROM sessions s
-       JOIN users u ON u.id = s.user_id
-       JOIN organizations o ON o.id = u.organization_id
-       WHERE s.token_digest = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
-         AND u.disabled_at IS NULL`,
+       FROM sessions s JOIN users u ON u.id = s.user_id JOIN organizations o ON o.id = u.organization_id
+       WHERE s.token_digest = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.disabled_at IS NULL`,
       [tokenDigest(token)],
     )
     const row = result.rows[0]
-    if (!row) return null
-    return { user: toUser(row), expiresAt: row.expires_at.toISOString() }
+    return row ? { user: toUser(row), expiresAt: row.expires_at.toISOString() } : null
   }
 
   async revokeSession(token: string) {
-    await this.pool.query(
-      'UPDATE sessions SET revoked_at = now() WHERE token_digest = $1 AND revoked_at IS NULL',
-      [tokenDigest(token)],
-    )
+    await this.pool.query('UPDATE sessions SET revoked_at = now() WHERE token_digest = $1 AND revoked_at IS NULL', [tokenDigest(token)])
   }
 }
 
