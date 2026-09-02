@@ -72,10 +72,12 @@ function sessionCookieOptions() {
 }
 
 app.setErrorHandler((error, request, reply) => {
-  if (error.name === 'UNTRUSTED_ORIGIN') {
+  const errorName = error instanceof Error ? error.name : undefined
+  const errorMessage = error instanceof Error ? error.message : 'Unexpected request error.'
+  if (errorName === 'UNTRUSTED_ORIGIN') {
     return reply.code(403).send(apiFailure('UNTRUSTED_ORIGIN', 'Request origin is not trusted.', request.id))
   }
-  if (error.name === 'DEPENDENCY_UNAVAILABLE') {
+  if (errorName === 'DEPENDENCY_UNAVAILABLE') {
     return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'Authentication persistence is unavailable.', request.id))
   }
   if (error instanceof AuthenticationRequiredError) {
@@ -85,7 +87,7 @@ app.setErrorHandler((error, request, reply) => {
     return reply.code(403).send(apiFailure('FORBIDDEN', error.message, request.id))
   }
   request.log.error({ err: error }, 'Unhandled request error')
-  return reply.code(500).send(apiFailure('INTERNAL_ERROR', 'An unexpected error occurred.', request.id))
+  return reply.code(500).send(apiFailure('INTERNAL_ERROR', errorMessage, request.id))
 })
 
 app.get('/health', async (request) => apiSuccess({ status: 'ok' }, request.id))
