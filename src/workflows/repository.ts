@@ -1,10 +1,11 @@
 import { Pool } from 'pg'
-import type { CreateWorkflowRequest, Workflow, WorkflowStatus } from '../contracts/workflows.js'
+import type { CreateWorkflowRequest, UpdateWorkflowRequest, Workflow, WorkflowStatus } from '../contracts/workflows.js'
 
 export interface WorkflowRepository {
   create(organizationId: string, userId: string, input: CreateWorkflowRequest): Promise<Workflow>
   list(organizationId: string, limit: number): Promise<Workflow[]>
   getById(organizationId: string, workflowId: string): Promise<Workflow | null>
+  update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest): Promise<Workflow | null>
 }
 
 function mapWorkflow(row: any): Workflow {
@@ -25,6 +26,17 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   }
   async getById(organizationId: string, workflowId: string) {
     const result = await this.pool.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 AND id = $2`, [organizationId, workflowId])
+    return result.rows[0] ? mapWorkflow(result.rows[0]) : null
+  }
+  async update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest) {
+    const fields: string[] = []
+    const values: unknown[] = [organizationId, workflowId]
+    if (input.name !== undefined) { values.push(input.name.trim()); fields.push(`name = $${values.length}`) }
+    if (input.description !== undefined) { values.push(input.description?.trim() || null); fields.push(`description = $${values.length}`) }
+    if (input.status !== undefined) { values.push(input.status); fields.push(`status = $${values.length}`) }
+    if (fields.length === 0) return this.getById(organizationId, workflowId)
+    fields.push('updated_at = now()')
+    const result = await this.pool.query(`UPDATE workflows SET ${fields.join(', ')} WHERE organization_id = $1 AND id = $2 RETURNING ${columns}`, values)
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
   }
 }
