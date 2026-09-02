@@ -3,12 +3,14 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
+import { Pool } from 'pg'
 import { z } from 'zod'
 import { apiFailure, apiSuccess } from './contracts/http.js'
 import type { AuthSession, LoginRequest, RegisterRequest } from './contracts/auth.js'
 import { createAuthRepository, type AuthRepository } from './auth/repository.js'
 import { assertTrustedOrigin } from './auth/origin-guard.js'
 import { requireAuthenticated, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
+import { AuditService } from './audit/service.js'
 
 const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
 
@@ -31,7 +33,12 @@ const loginSchema = z.object({
   password: z.string().min(1).max(128),
 }).strict()
 
+const auditQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+}).strict()
+
 let repository: AuthRepository | undefined
+let auditService: AuditService | undefined
 function authRepository(): AuthRepository {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) {
@@ -41,6 +48,17 @@ function authRepository(): AuthRepository {
   }
   repository ??= createAuthRepository(databaseUrl)
   return repository
+}
+
+function audits(): AuditService {
+  const databaseUrl = process.env.DATABASE_URL
+  if (!databaseUrl) {
+    const error = new Error('DATABASE_URL is not configured')
+    error.name = 'DEPENDENCY_UNAVAILABLE'
+    throw error
+  }
+  auditService ??= new AuditService(new Pool({ connectionString: databaseUrl, max: 5 }))
+  return auditService
 }
 
 function sessionCookieOptions() {
@@ -82,6 +100,15 @@ app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, rep
     const result = await authRepository().register(parsed.data)
     const session: AuthSession = { user: result.user, expiresAt: result.expiresAt }
     reply.setCookie('virexa_session', result.sessionToken, sessionCookieOptions())
+    await audits().record({
+      organizationId: result.user.organizationId,
+      actorUserId: result.user.id,
+      action: 'identity.registered',
+      resourceType: 'user',
+      resourceId: result.user.id,
+      requestId: request.id,
+      metadata: { role: result.user.role },
+    })
     return reply.code(201).send(apiSuccess(session, request.id))
   } catch (error: any) {
     if (error?.code === '23505') {
@@ -101,6 +128,13 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) =>
   if (!result) return reply.code(401).send(apiFailure('INVALID_CREDENTIALS', 'Email or password is incorrect.', request.id))
   const session: AuthSession = { user: result.user, expiresAt: result.expiresAt }
   reply.setCookie('virexa_session', result.sessionToken, sessionCookieOptions())
+  await audits().record({
+    organizationId: result.user.organizationId,
+    actorUserId: result.user.id,
+    action: 'identity.login_succeeded',
+    resourceType: 'session',
+    requestId: request.id,
+  })
   return reply.send(apiSuccess(session, request.id))
 })
 
@@ -118,7 +152,19 @@ app.get('/api/v1/auth/session', async (request, reply) => {
 app.post('/api/v1/auth/logout', async (request, reply) => {
   assertTrustedOrigin(request)
   const token = request.cookies.virexa_session
-  if (token) await authRepository().revokeSession(token)
+  if (token) {
+    const session = await authRepository().getSession(token)
+    await authRepository().revokeSession(token)
+    if (session) {
+      await audits().record({
+        organizationId: session.user.organizationId,
+        actorUserId: session.user.id,
+        action: 'identity.logout',
+        resourceType: 'session',
+        requestId: request.id,
+      })
+    }
+  }
   reply.clearCookie('virexa_session', { path: '/' })
   return reply.send(apiSuccess({ success: true }, request.id))
 })
@@ -127,6 +173,17 @@ app.get('/api/v1/me', async (request, reply) => {
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'platform:read')
   return reply.send(apiSuccess(context, request.id))
+})
+
+app.get('/api/v1/audit/events', async (request, reply) => {
+  const context = await requireAuthenticated(request, authRepository())
+  requirePermission(context, 'audit:read')
+  const parsed = auditQuerySchema.safeParse(request.query ?? {})
+  if (!parsed.success) {
+    return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Audit query parameters are invalid.', request.id))
+  }
+  const events = await audits().listForOrganization(context.user.organizationId, parsed.data.limit)
+  return reply.send(apiSuccess(events, request.id))
 })
 
 const port = Number(process.env.PORT ?? 4000)
