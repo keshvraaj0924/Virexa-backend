@@ -9,6 +9,19 @@ export type Permission =
   | 'workflow:create'
   | 'workflow:manage'
 
+export type ApiErrorCode =
+  | 'VALIDATION_ERROR'
+  | 'UNTRUSTED_ORIGIN'
+  | 'DEPENDENCY_UNAVAILABLE'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'INTERNAL_ERROR'
+  | 'EMAIL_ALREADY_REGISTERED'
+  | 'INVALID_CREDENTIALS'
+  | 'INVALID_STATE_TRANSITION'
+  | 'WORKFLOW_CONFLICT'
+
 export interface UserSummary {
   id: string
   email: string
@@ -50,7 +63,7 @@ export interface ApiSuccess<T> {
 }
 
 export interface ApiErrorBody {
-  code: string
+  code: ApiErrorCode
   message: string
   requestId: string
   fieldErrors?: Record<string, string[]>
