@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canManageWorkflow } from './policy.js'
+import { canManageWorkflow, canTransitionWorkflowStatus } from './policy.js'
 import type { AuthenticatedContext } from '../auth/context.js'
 import type { Workflow } from '../contracts/workflows.js'
 
@@ -24,5 +24,25 @@ describe('workflow mutation policy', () => {
 
   it('denies users without mutation permission even when they created the workflow', () => {
     expect(canManageWorkflow(context('user-1', ['workflow:read']), workflow)).toBe(false)
+  })
+})
+
+describe('workflow lifecycle policy', () => {
+  it('allows idempotent status updates', () => {
+    expect(canTransitionWorkflowStatus('active', 'active')).toBe(true)
+  })
+
+  it('allows only supported forward lifecycle transitions', () => {
+    expect(canTransitionWorkflowStatus('draft', 'active')).toBe(true)
+    expect(canTransitionWorkflowStatus('active', 'paused')).toBe(true)
+    expect(canTransitionWorkflowStatus('active', 'archived')).toBe(true)
+    expect(canTransitionWorkflowStatus('paused', 'active')).toBe(true)
+    expect(canTransitionWorkflowStatus('paused', 'archived')).toBe(true)
+  })
+
+  it('rejects reopening archived workflows and skipping the draft state', () => {
+    expect(canTransitionWorkflowStatus('archived', 'active')).toBe(false)
+    expect(canTransitionWorkflowStatus('draft', 'paused')).toBe(false)
+    expect(canTransitionWorkflowStatus('draft', 'archived')).toBe(false)
   })
 })

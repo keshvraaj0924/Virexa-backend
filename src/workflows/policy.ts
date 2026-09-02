@@ -1,5 +1,5 @@
 import type { AuthenticatedContext } from '../auth/context.js'
-import type { Workflow } from '../contracts/workflows.js'
+import type { Workflow, WorkflowStatus } from '../contracts/workflows.js'
 
 /**
  * Workflow mutation policy combines RBAC with resource ownership.
@@ -9,4 +9,15 @@ import type { Workflow } from '../contracts/workflows.js'
 export function canManageWorkflow(context: AuthenticatedContext, workflow: Workflow): boolean {
   if (context.permissions.includes('workflow:manage')) return true
   return context.permissions.includes('workflow:create') && workflow.createdByUserId === context.user.id
+}
+
+const ALLOWED_STATUS_TRANSITIONS: Record<WorkflowStatus, readonly WorkflowStatus[]> = {
+  draft: ['active'],
+  active: ['paused', 'archived'],
+  paused: ['active', 'archived'],
+  archived: [],
+}
+
+export function canTransitionWorkflowStatus(current: WorkflowStatus, next: WorkflowStatus): boolean {
+  return current === next || ALLOWED_STATUS_TRANSITIONS[current].includes(next)
 }
