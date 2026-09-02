@@ -43,13 +43,12 @@ function sessionCookieOptions() { return { httpOnly: true, secure: process.env.N
 
 app.setErrorHandler((error, request, reply) => {
   const errorName = error instanceof Error ? error.name : undefined
-  const errorMessage = error instanceof Error ? error.message : 'Unexpected request error.'
   if (errorName === 'UNTRUSTED_ORIGIN') return reply.code(403).send(apiFailure('UNTRUSTED_ORIGIN', 'Request origin is not trusted.', request.id))
-  if (errorName === 'DEPENDENCY_UNAVAILABLE') return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'Authentication persistence is unavailable.', request.id))
+  if (errorName === 'DEPENDENCY_UNAVAILABLE') return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'A required service is unavailable.', request.id))
   if (error instanceof AuthenticationRequiredError) return reply.code(401).send(apiFailure('UNAUTHENTICATED', error.message, request.id))
   if (error instanceof PermissionDeniedError) return reply.code(403).send(apiFailure('FORBIDDEN', error.message, request.id))
   request.log.error({ err: error }, 'Unhandled request error')
-  return reply.code(500).send(apiFailure('INTERNAL_ERROR', errorMessage, request.id))
+  return reply.code(500).send(apiFailure('INTERNAL_ERROR', 'An unexpected server error occurred.', request.id))
 })
 
 app.get('/health', async (request) => apiSuccess({ status: 'ok' }, request.id))
