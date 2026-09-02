@@ -12,7 +12,7 @@ import { createAuthRepository, type AuthRepository } from './auth/repository.js'
 import { assertTrustedOrigin } from './auth/origin-guard.js'
 import { requireAuthenticated, requireAnyPermission, requirePermission, AuthenticationRequiredError, PermissionDeniedError } from './auth/context.js'
 import { AuditService } from './audit/service.js'
-import { PostgresWorkflowRepository } from './workflows/repository.js'
+import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from './workflows/repository.js'
 import { canManageWorkflow, canTransitionWorkflowStatus } from './workflows/policy.js'
 
 const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
@@ -25,6 +25,7 @@ const loginSchema = z.object({ email: z.string().trim().email().max(320), passwo
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict()
 const workflowQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict()
 const workflowIdSchema = z.string().uuid()
+const idempotencyKeySchema = z.string().trim().min(16).max(255)
 const createWorkflowSchema = z.object({ name: z.string().trim().min(1).max(160), description: z.string().trim().max(4000).nullable().optional() }).strict()
 const updateWorkflowSchema = z.object({ name: z.string().trim().min(1).max(160).optional(), description: z.string().trim().max(4000).nullable().optional(), status: z.enum(['draft', 'active', 'paused', 'archived']).optional() }).strict().refine((value) => Object.keys(value).length > 0, { message: 'At least one workflow field must be provided.' })
 
@@ -47,6 +48,7 @@ app.setErrorHandler((error, request, reply) => {
   if (errorName === 'DEPENDENCY_UNAVAILABLE') return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'A required service is unavailable.', request.id))
   if (error instanceof AuthenticationRequiredError) return reply.code(401).send(apiFailure('UNAUTHENTICATED', error.message, request.id))
   if (error instanceof PermissionDeniedError) return reply.code(403).send(apiFailure('FORBIDDEN', error.message, request.id))
+  if (error instanceof IdempotencyKeyReuseError) return reply.code(409).send(apiFailure('IDEMPOTENCY_KEY_REUSED', error.message, request.id))
   request.log.error({ err: error }, 'Unhandled request error')
   return reply.code(500).send(apiFailure('INTERNAL_ERROR', 'An unexpected server error occurred.', request.id))
 })
@@ -130,9 +132,14 @@ app.post<{ Body: CreateWorkflowRequest }>('/api/v1/workflows', async (request, r
   requirePermission(context, 'workflow:create')
   const parsed = createWorkflowSchema.safeParse(request.body)
   if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Workflow data is invalid.', request.id, parsed.error.flatten().fieldErrors))
-  const workflow = await workflows().create(context.user.organizationId, context.user.id, parsed.data)
-  await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.created', resourceType: 'workflow', resourceId: workflow.id, requestId: request.id })
-  return reply.code(201).send(apiSuccess(workflow, request.id))
+  const rawKey = request.headers['idempotency-key']
+  const parsedKey = idempotencyKeySchema.safeParse(typeof rawKey === 'string' ? rawKey : '')
+  if (!parsedKey.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'A valid Idempotency-Key header is required.', request.id, { idempotencyKey: ['Use a 16-255 character unique key.'] }))
+  const result = await workflows().createIdempotent(context.user.organizationId, context.user.id, parsed.data, parsedKey.data)
+  if (!result.replayed) {
+    await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'workflow.created', resourceType: 'workflow', resourceId: result.workflow.id, requestId: request.id })
+  }
+  return reply.code(result.replayed ? 200 : 201).send(apiSuccess(result.workflow, request.id))
 })
 
 app.get<{ Params: { workflowId: string } }>('/api/v1/workflows/:workflowId', async (request, reply) => {

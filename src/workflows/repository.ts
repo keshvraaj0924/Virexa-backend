@@ -1,11 +1,20 @@
+import { createHash } from 'node:crypto'
 import { Pool } from 'pg'
 import type { CreateWorkflowRequest, UpdateWorkflowRequest, Workflow, WorkflowStatus } from '../contracts/workflows.js'
 
 export interface WorkflowRepository {
   create(organizationId: string, userId: string, input: CreateWorkflowRequest): Promise<Workflow>
+  createIdempotent(organizationId: string, userId: string, input: CreateWorkflowRequest, idempotencyKey: string): Promise<{ workflow: Workflow; replayed: boolean }>
   list(organizationId: string, limit: number): Promise<Workflow[]>
   getById(organizationId: string, workflowId: string): Promise<Workflow | null>
   update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus): Promise<Workflow | null>
+}
+
+export class IdempotencyKeyReuseError extends Error {
+  constructor() {
+    super('The idempotency key was already used with a different request.')
+    this.name = 'IDEMPOTENCY_KEY_REUSED'
+  }
 }
 
 function mapWorkflow(row: any): Workflow {
@@ -14,20 +23,81 @@ function mapWorkflow(row: any): Workflow {
 
 const columns = 'id, organization_id, created_by_user_id, name, description, status, created_at, updated_at'
 
+function normalizedCreatePayload(input: CreateWorkflowRequest): CreateWorkflowRequest {
+  return { name: input.name.trim(), description: input.description?.trim() || null }
+}
+
+function requestHash(input: CreateWorkflowRequest): string {
+  return createHash('sha256').update(JSON.stringify(normalizedCreatePayload(input))).digest('hex')
+}
+
 export class PostgresWorkflowRepository implements WorkflowRepository {
   constructor(private readonly pool: Pool) {}
+
   async create(organizationId: string, userId: string, input: CreateWorkflowRequest) {
-    const result = await this.pool.query(`INSERT INTO workflows (organization_id, created_by_user_id, name, description) VALUES ($1, $2, $3, $4) RETURNING ${columns}`, [organizationId, userId, input.name.trim(), input.description?.trim() || null])
+    const normalized = normalizedCreatePayload(input)
+    const result = await this.pool.query(`INSERT INTO workflows (organization_id, created_by_user_id, name, description) VALUES ($1, $2, $3, $4) RETURNING ${columns}`, [organizationId, userId, normalized.name, normalized.description])
     return mapWorkflow(result.rows[0])
   }
+
+  async createIdempotent(organizationId: string, userId: string, input: CreateWorkflowRequest, idempotencyKey: string) {
+    const normalized = normalizedCreatePayload(input)
+    const hash = requestHash(normalized)
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        `INSERT INTO workflow_idempotency_keys (organization_id, idempotency_key, request_hash)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (organization_id, idempotency_key) DO NOTHING`,
+        [organizationId, idempotencyKey, hash],
+      )
+      const keyResult = await client.query(
+        `SELECT request_hash, workflow_id FROM workflow_idempotency_keys
+         WHERE organization_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+        [organizationId, idempotencyKey],
+      )
+      const keyRecord = keyResult.rows[0]
+      if (keyRecord.request_hash !== hash) throw new IdempotencyKeyReuseError()
+
+      if (keyRecord.workflow_id) {
+        const existing = await client.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 AND id = $2`, [organizationId, keyRecord.workflow_id])
+        if (!existing.rows[0]) throw new Error('Idempotency record references a missing workflow')
+        await client.query('COMMIT')
+        return { workflow: mapWorkflow(existing.rows[0]), replayed: true }
+      }
+
+      const workflowResult = await client.query(
+        `INSERT INTO workflows (organization_id, created_by_user_id, name, description)
+         VALUES ($1, $2, $3, $4) RETURNING ${columns}`,
+        [organizationId, userId, normalized.name, normalized.description],
+      )
+      const workflow = mapWorkflow(workflowResult.rows[0])
+      await client.query(
+        `UPDATE workflow_idempotency_keys SET workflow_id = $3
+         WHERE organization_id = $1 AND idempotency_key = $2`,
+        [organizationId, idempotencyKey, workflow.id],
+      )
+      await client.query('COMMIT')
+      return { workflow, replayed: false }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   async list(organizationId: string, limit: number) {
     const result = await this.pool.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 ORDER BY created_at DESC LIMIT $2`, [organizationId, limit])
     return result.rows.map(mapWorkflow)
   }
+
   async getById(organizationId: string, workflowId: string) {
     const result = await this.pool.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 AND id = $2`, [organizationId, workflowId])
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
   }
+
   async update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus) {
     const fields: string[] = []
     const values: unknown[] = [organizationId, workflowId]
