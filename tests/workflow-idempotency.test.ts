@@ -1,21 +1,33 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { Pool } from 'pg'
+import { randomUUID } from 'node:crypto'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from '../src/workflows/repository.js'
 
 const databaseUrl = process.env.DATABASE_URL
-const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 8 }) : null
+const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 16 }) : null
 
-test('workflow creation is idempotent within a tenant and rejects key reuse with a different payload', { skip: !pool }, async () => {
-  const organization = await pool!.query("INSERT INTO organizations (name) VALUES ('idempotency-test') RETURNING id")
+async function createFixture(name: string) {
+  const organization = await pool!.query('INSERT INTO organizations (name) VALUES ($1) RETURNING id', [name])
   const organizationId = organization.rows[0].id as string
   const user = await pool!.query(
     "INSERT INTO users (organization_id, email, display_name, password_hash, role) VALUES ($1, $2, 'Idempotency Test', 'test-only-hash', 'admin') RETURNING id",
-    [organizationId, `${organizationId}@test.invalid`],
+    [organizationId, `${randomUUID()}@test.invalid`],
   )
-  const userId = user.rows[0].id as string
+  return { organizationId, userId: user.rows[0].id as string }
+}
+
+async function cleanupFixture(organizationId: string) {
+  await pool!.query('DELETE FROM workflow_idempotency_keys WHERE organization_id = $1', [organizationId])
+  await pool!.query('DELETE FROM workflows WHERE organization_id = $1', [organizationId])
+  await pool!.query('DELETE FROM users WHERE organization_id = $1', [organizationId])
+  await pool!.query('DELETE FROM organizations WHERE id = $1', [organizationId])
+}
+
+test('workflow creation is idempotent within a tenant and rejects key reuse with a different payload', { skip: !pool }, async () => {
+  const { organizationId, userId } = await createFixture('idempotency-test')
   const repository = new PostgresWorkflowRepository(pool!)
-  const key = 'workflow-create-idempotency-test-001'
+  const key = `workflow-create-idempotency-${randomUUID()}`
 
   try {
     const first = await repository.createIdempotent(organizationId, userId, { name: 'Order intake' }, key)
@@ -30,23 +42,14 @@ test('workflow creation is idempotent within a tenant and rejects key reuse with
       (error: unknown) => error instanceof IdempotencyKeyReuseError,
     )
   } finally {
-    await pool!.query('DELETE FROM workflow_idempotency_keys WHERE organization_id = $1', [organizationId])
-    await pool!.query('DELETE FROM workflows WHERE organization_id = $1', [organizationId])
-    await pool!.query('DELETE FROM users WHERE organization_id = $1', [organizationId])
-    await pool!.query('DELETE FROM organizations WHERE id = $1', [organizationId])
+    await cleanupFixture(organizationId)
   }
 })
 
 test('concurrent workflow creation with the same tenant key creates exactly one workflow', { skip: !pool }, async () => {
-  const organization = await pool!.query("INSERT INTO organizations (name) VALUES ('idempotency-concurrency-test') RETURNING id")
-  const organizationId = organization.rows[0].id as string
-  const user = await pool!.query(
-    "INSERT INTO users (organization_id, email, display_name, password_hash, role) VALUES ($1, $2, 'Idempotency Concurrency Test', 'test-only-hash', 'admin') RETURNING id",
-    [organizationId, `${organizationId}@test.invalid`],
-  )
-  const userId = user.rows[0].id as string
+  const { organizationId, userId } = await createFixture('idempotency-concurrency-test')
   const repository = new PostgresWorkflowRepository(pool!)
-  const key = 'workflow-create-idempotency-concurrency-001'
+  const key = `workflow-create-idempotency-concurrency-${randomUUID()}`
 
   try {
     const results = await Promise.all(
@@ -63,10 +66,7 @@ test('concurrent workflow creation with the same tenant key creates exactly one 
     )
     assert.equal(persisted.rows[0].count, 1)
   } finally {
-    await pool!.query('DELETE FROM workflow_idempotency_keys WHERE organization_id = $1', [organizationId])
-    await pool!.query('DELETE FROM workflows WHERE organization_id = $1', [organizationId])
-    await pool!.query('DELETE FROM users WHERE organization_id = $1', [organizationId])
-    await pool!.query('DELETE FROM organizations WHERE id = $1', [organizationId])
+    await cleanupFixture(organizationId)
   }
 })
 
