@@ -42,6 +42,14 @@ function audits(): AuditService { auditService ??= new AuditService(new Pool({ c
 function workflows(): PostgresWorkflowRepository { workflowRepository ??= new PostgresWorkflowRepository(new Pool({ connectionString: databaseUrl(), max: 10 })); return workflowRepository }
 function sessionCookieOptions() { return { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/', maxAge: 60 * 60 * 8 } }
 
+app.addHook('onClose', async () => {
+  await Promise.all([
+    repository?.close?.(),
+    auditService?.close(),
+    workflowRepository?.close(),
+  ])
+})
+
 app.setErrorHandler((error, request, reply) => {
   const errorName = error instanceof Error ? error.name : undefined
   if (errorName === 'UNTRUSTED_ORIGIN') return reply.code(403).send(apiFailure('UNTRUSTED_ORIGIN', 'Request origin is not trusted.', request.id))
