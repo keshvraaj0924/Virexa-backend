@@ -48,7 +48,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     try {
       await client.query('BEGIN')
       // Serialize only callers sharing the same tenant/key. The lock is transaction-scoped.
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1 || ":" || $2, 0))', [organizationId, idempotencyKey])
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))", [organizationId, idempotencyKey])
       await client.query(
         `INSERT INTO workflow_idempotency_keys (organization_id, idempotency_key, request_hash)
          VALUES ($1, $2, $3)
