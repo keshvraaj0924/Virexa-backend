@@ -47,18 +47,33 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      // The unique key's conflict row is the serialization primitive: PostgreSQL locks it
-      // while resolving the upsert, so concurrent callers for the same tenant/key observe
-      // the committed workflow reference without requiring application-level locks.
-      const keyResult = await client.query(
+
+      // Reserve the tenant-scoped key. A concurrent INSERT waits on the unique
+      // constraint and then observes the committed reservation without requiring
+      // an application-level lock or a no-op UPDATE.
+      const inserted = await client.query(
         `INSERT INTO workflow_idempotency_keys (organization_id, idempotency_key, request_hash)
          VALUES ($1, $2, $3)
-         ON CONFLICT (organization_id, idempotency_key)
-         DO UPDATE SET request_hash = workflow_idempotency_keys.request_hash
+         ON CONFLICT (organization_id, idempotency_key) DO NOTHING
          RETURNING request_hash, workflow_id`,
         [organizationId, idempotencyKey, hash],
       )
-      const keyRecord = keyResult.rows[0]
+
+      let keyRecord = inserted.rows[0]
+      const replayed = !keyRecord
+
+      if (!keyRecord) {
+        const existing = await client.query(
+          `SELECT request_hash, workflow_id
+           FROM workflow_idempotency_keys
+           WHERE organization_id = $1 AND idempotency_key = $2
+           FOR UPDATE`,
+          [organizationId, idempotencyKey],
+        )
+        keyRecord = existing.rows[0]
+        if (!keyRecord) throw new Error('Idempotency reservation disappeared before it could be read')
+      }
+
       if (keyRecord.request_hash !== hash) throw new IdempotencyKeyReuseError()
 
       if (keyRecord.workflow_id) {
@@ -80,7 +95,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         [organizationId, idempotencyKey, workflow.id],
       )
       await client.query('COMMIT')
-      return { workflow, replayed: false }
+      return { workflow, replayed }
     } catch (error) {
       await client.query('ROLLBACK')
       throw error
