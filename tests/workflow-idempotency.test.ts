@@ -52,13 +52,20 @@ test('concurrent workflow creation with the same tenant key creates exactly one 
   const key = `workflow-create-idempotency-concurrency-${randomUUID()}`
 
   try {
-    const results = await Promise.all(
+    const results = await Promise.allSettled(
       Array.from({ length: 8 }, () => repository.createIdempotent(organizationId, userId, { name: 'Concurrent intake' }, key)),
     )
 
-    assert.equal(results.filter((result) => !result.replayed).length, 1)
-    assert.equal(results.filter((result) => result.replayed).length, 7)
-    assert.equal(new Set(results.map((result) => result.workflow.id)).size, 1)
+    const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    assert.equal(rejected.length, 0, rejected.map((result) => String(result.reason)).join('\n'))
+
+    const fulfilled = results.map((result) => {
+      assert.equal(result.status, 'fulfilled')
+      return result.value
+    })
+    assert.equal(fulfilled.filter((result) => !result.replayed).length, 1)
+    assert.equal(fulfilled.filter((result) => result.replayed).length, 7)
+    assert.equal(new Set(fulfilled.map((result) => result.workflow.id)).size, 1)
 
     const persisted = await pool!.query(
       'SELECT COUNT(*)::int AS count FROM workflows WHERE organization_id = $1',
