@@ -66,4 +66,8 @@ export class AuditService {
       createdAt: row.created_at.toISOString(),
     }))
   }
+
+  async close() {
+    await this.pool.end()
+  }
 }

@@ -8,6 +8,7 @@ export interface WorkflowRepository {
   list(organizationId: string, limit: number): Promise<Workflow[]>
   getById(organizationId: string, workflowId: string): Promise<Workflow | null>
   update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus): Promise<Workflow | null>
+  close?(): Promise<void>
 }
 
 export class IdempotencyKeyReuseError extends Error {
@@ -109,5 +110,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const statusPredicate = expectedStatus === undefined ? '' : ` AND status = $${values.push(expectedStatus)}`
     const result = await this.pool.query(`UPDATE workflows SET ${fields.join(', ')} WHERE organization_id = $1 AND id = $2${statusPredicate} RETURNING ${columns}`, values)
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
+  }
+
+  async close() {
+    await this.pool.end()
   }
 }
