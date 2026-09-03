@@ -1,18 +1,10 @@
-import { readFile } from 'node:fs/promises'
-import { test, before, after } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { Pool } from 'pg'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from '../src/workflows/repository.js'
 
 const databaseUrl = process.env.DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null
-
-before(async () => {
-  if (!pool) return
-  for (const migration of ['001_auth.sql', '002_audit_events.sql', '003_workflows.sql', '004_workflow_idempotency.sql']) {
-    await pool.query(await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'))
-  }
-})
 
 test('workflow creation is idempotent within a tenant and rejects key reuse with a different payload', { skip: !pool }, async () => {
   const organization = await pool!.query("INSERT INTO organizations (name) VALUES ('idempotency-test') RETURNING id")

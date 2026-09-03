@@ -38,6 +38,13 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
+      - name: Prepare test database
+        run: |
+          for migration in migrations/001_auth.sql migrations/002_audit_events.sql migrations/003_workflows.sql migrations/004_workflow_idempotency.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+        env:
+          PGPASSWORD: virexa_ci
       - name: Test
         run: npm test
       - name: Build
