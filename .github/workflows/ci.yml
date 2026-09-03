@@ -1,0 +1,79 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: virexa_ci
+          POSTGRES_DB: virexa_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d virexa_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:virexa_ci@localhost:5432/virexa_ci
+      FRONTEND_ORIGIN: http://localhost:3000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Prepare test database
+        run: |
+          for migration in migrations/001_auth.sql migrations/002_audit_events.sql migrations/003_workflows.sql migrations/004_workflow_idempotency.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+        env:
+          PGPASSWORD: virexa_ci
+      - name: Unit tests
+        id: unit-tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run test:unit 2>&1 | tee unit-test-output.log
+      - name: Integration tests
+        id: integration-tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run test:node 2>&1 | tee integration-test-output.log
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-output
+          path: |
+            unit-test-output.log
+            integration-test-output.log
+          if-no-files-found: warn
+      - name: Test gate
+        if: always()
+        run: |
+          if [ "${{ steps.unit-tests.outcome }}" != "success" ] || [ "${{ steps.integration-tests.outcome }}" != "success" ]; then
+            echo "One or more test suites failed. See the backend-test-output artifact for complete diagnostics."
+            exit 1
+          fi
+      - name: Build
+        if: always()
+        run: npm run build
