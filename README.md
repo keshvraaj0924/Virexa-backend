@@ -12,6 +12,16 @@ Enterprise API foundation for Virexa.
 - Authentication designed around secure, HttpOnly session cookies rather than browser-managed bearer secrets
 - Auditability and least-privilege access as first-class concerns
 
+## Operational endpoints
+
+### `GET /health`
+
+Liveness probe. Returns `200` when the HTTP process is responsive. It intentionally does not require database connectivity so an orchestrator can distinguish a live process from a dependency failure.
+
+### `GET /ready`
+
+Readiness probe. Executes a real `SELECT 1` against the configured PostgreSQL database through the application repository pool. Returns `200` only when the database dependency is reachable; otherwise returns the standard `503 DEPENDENCY_UNAVAILABLE` error envelope. Both endpoints include the request correlation ID in the standard response metadata.
+
 ## Initial authentication contract
 
 ### `POST /api/v1/auth/register`
