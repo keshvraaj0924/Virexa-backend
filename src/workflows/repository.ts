@@ -47,18 +47,16 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      // Serialize only callers sharing the same tenant/key. The lock is transaction-scoped.
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))", [organizationId, idempotencyKey])
-      await client.query(
+      // The unique key's conflict row is the serialization primitive: PostgreSQL locks it
+      // while resolving the upsert, so concurrent callers for the same tenant/key observe
+      // the committed workflow reference without requiring application-level locks.
+      const keyResult = await client.query(
         `INSERT INTO workflow_idempotency_keys (organization_id, idempotency_key, request_hash)
          VALUES ($1, $2, $3)
-         ON CONFLICT (organization_id, idempotency_key) DO NOTHING`,
+         ON CONFLICT (organization_id, idempotency_key)
+         DO UPDATE SET request_hash = workflow_idempotency_keys.request_hash
+         RETURNING request_hash, workflow_id`,
         [organizationId, idempotencyKey, hash],
-      )
-      const keyResult = await client.query(
-        `SELECT request_hash, workflow_id FROM workflow_idempotency_keys
-         WHERE organization_id = $1 AND idempotency_key = $2 FOR UPDATE`,
-        [organizationId, idempotencyKey],
       )
       const keyRecord = keyResult.rows[0]
       if (keyRecord.request_hash !== hash) throw new IdempotencyKeyReuseError()
