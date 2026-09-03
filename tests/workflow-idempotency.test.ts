@@ -8,7 +8,7 @@ const databaseUrl = process.env.DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 16 }) : null
 
 async function createFixture(name: string) {
-  const organization = await pool!.query('INSERT INTO organizations (name) VALUES ($1) RETURNING id', [name])
+  const organization = await pool!.query('INSERT INTO organizations (name) VALUES ($1) RETURNING id', [`${name}-${randomUUID()}`])
   const organizationId = organization.rows[0].id as string
   const user = await pool!.query(
     "INSERT INTO users (organization_id, email, display_name, password_hash, role) VALUES ($1, $2, 'Idempotency Test', 'test-only-hash', 'admin') RETURNING id",
