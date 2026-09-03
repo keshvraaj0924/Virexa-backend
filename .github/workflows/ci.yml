@@ -46,16 +46,34 @@ jobs:
           done
         env:
           PGPASSWORD: virexa_ci
-      - name: Test
+      - name: Unit tests
+        id: unit-tests
+        continue-on-error: true
         run: |
           set -o pipefail
-          npm test 2>&1 | tee test-output.log
+          npm run test:unit 2>&1 | tee unit-test-output.log
+      - name: Integration tests
+        id: integration-tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run test:node 2>&1 | tee integration-test-output.log
       - name: Upload test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-output
-          path: test-output.log
+          path: |
+            unit-test-output.log
+            integration-test-output.log
           if-no-files-found: warn
+      - name: Test gate
+        if: always()
+        run: |
+          if [ "${{ steps.unit-tests.outcome }}" != "success" ] || [ "${{ steps.integration-tests.outcome }}" != "success" ]; then
+            echo "One or more test suites failed. See the backend-test-output artifact for complete diagnostics."
+            exit 1
+          fi
       - name: Build
+        if: always()
         run: npm run build
