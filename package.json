@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit && npm run test:node",
     "test:unit": "vitest run src/**/*.test.ts",
-    "test:node": "node scripts/run-node-tests.mjs"
+    "test:node": "node --import=tsx --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.0",
