@@ -38,14 +38,14 @@ export class PostgresAuthRepository implements AuthRepository {
       const user = await client.query(
         `INSERT INTO users (organization_id, email, display_name, password_hash, role)
          VALUES ($1, lower($2), $3, $4, 'admin')
-         RETURNING id, email, display_name, role, organization_id`,
+         RETURNING id AS user_id, email, display_name, role, organization_id`,
         [organization.rows[0].id, input.email, input.displayName.trim(), passwordHash],
       )
       const token = createSessionToken()
       const session = await client.query(
         `INSERT INTO sessions (user_id, token_digest, expires_at)
          VALUES ($1, $2, now() + interval '8 hours') RETURNING expires_at`,
-        [user.rows[0].id, tokenDigest(token)],
+        [user.rows[0].user_id, tokenDigest(token)],
       )
       await client.query('COMMIT')
       const summary = toUser({ ...user.rows[0], organization_name: organization.rows[0].name })

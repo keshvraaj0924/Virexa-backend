@@ -41,6 +41,8 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
   assert.equal(registerB.statusCode, 201)
   const cookieB = cookieFrom(registerB)
   const sessionB = registerB.json().data
+  assert.match(sessionA.user.id, /^[0-9a-f-]{36}$/)
+  assert.match(sessionB.user.id, /^[0-9a-f-]{36}$/)
 
   try {
     const createA = await app.inject({
