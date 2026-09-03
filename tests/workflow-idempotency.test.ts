@@ -4,7 +4,7 @@ import { Pool } from 'pg'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from '../src/workflows/repository.js'
 
 const databaseUrl = process.env.DATABASE_URL
-const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null
+const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 8 }) : null
 
 test('workflow creation is idempotent within a tenant and rejects key reuse with a different payload', { skip: !pool }, async () => {
   const organization = await pool!.query("INSERT INTO organizations (name) VALUES ('idempotency-test') RETURNING id")
