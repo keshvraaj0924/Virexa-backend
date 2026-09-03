@@ -53,6 +53,9 @@ test('workflow repository never exposes one tenant resources to another tenant',
     assert.deepEqual((await repository.list(organizationAId, 50)).map((workflow) => workflow.id), [workflowA.workflow.id])
     assert.deepEqual((await repository.list(organizationBId, 50)).map((workflow) => workflow.id), [workflowB.workflow.id])
   } finally {
+    await pool!.query('DELETE FROM workflow_idempotency_keys WHERE organization_id = ANY($1::uuid[])', [[organizationAId, organizationBId]])
+    await pool!.query('DELETE FROM workflows WHERE organization_id = ANY($1::uuid[])', [[organizationAId, organizationBId]])
+    await pool!.query('DELETE FROM users WHERE organization_id = ANY($1::uuid[])', [[organizationAId, organizationBId]])
     await pool!.query('DELETE FROM organizations WHERE id = ANY($1::uuid[])', [[organizationAId, organizationBId]])
   }
 })
