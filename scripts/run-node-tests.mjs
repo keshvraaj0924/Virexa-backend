@@ -1,8 +1,7 @@
 import { readdirSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 
-const testFiles = readdirSync(resolve('tests'))
+const testFiles = readdirSync('tests')
   .filter((file) => file.endsWith('.test.ts'))
   .sort()
 
@@ -13,20 +12,20 @@ if (testFiles.length === 0) {
 
 for (const file of testFiles) {
   console.log(`\n=== Running ${file} ===`)
-  const result = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', '--test', '--test-concurrency=1', resolve('tests', file)],
-    { stdio: 'inherit' },
-  )
 
-  if (result.error) {
-    console.error(`Failed to start integration test ${file}:`, result.error)
-    process.exit(1)
-  }
+  try {
+    execFileSync(
+      process.execPath,
+      ['--import=tsx', '--test', '--test-concurrency=1', `tests/${file}`],
+      { stdio: 'inherit' },
+    )
+  } catch (error) {
+    const exitCode = typeof error === 'object' && error !== null && 'status' in error
+      ? Number(error.status)
+      : 1
 
-  if (result.status !== 0) {
     console.error(`Integration test failed: ${file}`)
-    process.exit(result.status ?? 1)
+    process.exit(Number.isInteger(exitCode) && exitCode > 0 ? exitCode : 1)
   }
 }
 
