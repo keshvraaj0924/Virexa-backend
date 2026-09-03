@@ -14,11 +14,14 @@ import { requireAuthenticated, requireAnyPermission, requirePermission, Authenti
 import { AuditService } from './audit/service.js'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from './workflows/repository.js'
 import { canManageWorkflow, canTransitionWorkflowStatus } from './workflows/policy.js'
+import { assertProductionConfiguration, frontendOrigin } from './config/runtime.js'
+
+assertProductionConfiguration()
 
 export const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
-await app.register(cors, { origin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000', credentials: true })
+await app.register(cors, { origin: frontendOrigin(), credentials: true })
 
 const registerSchema = z.object({ displayName: z.string().trim().min(2).max(120), email: z.string().trim().email().max(320), password: z.string().min(12).max(128), organizationName: z.string().trim().min(2).max(160) }).strict()
 const loginSchema = z.object({ email: z.string().trim().email().max(320), password: z.string().min(1).max(128) }).strict()
