@@ -1,23 +1,10 @@
-import { readFile } from 'node:fs/promises'
-import { before, after, test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { Pool } from 'pg'
 import { PostgresWorkflowRepository } from '../src/workflows/repository.js'
 
 const databaseUrl = process.env.DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null
-
-before(async () => {
-  if (!pool) return
-
-  for (const migration of ['001_auth.sql', '002_audit_events.sql', '003_workflows.sql', '004_workflow_idempotency.sql']) {
-    await pool.query(await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'))
-  }
-})
-
-after(async () => {
-  await pool?.end()
-})
 
 test('workflow repository never exposes one tenant resources to another tenant', { skip: !pool }, async () => {
   const organizationA = await pool!.query("INSERT INTO organizations (name) VALUES ('tenant-isolation-a') RETURNING id")
@@ -68,4 +55,8 @@ test('workflow repository never exposes one tenant resources to another tenant',
   } finally {
     await pool!.query('DELETE FROM organizations WHERE id = ANY($1::uuid[])', [[organizationAId, organizationBId]])
   }
+})
+
+after(async () => {
+  await pool?.end()
 })
