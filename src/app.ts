@@ -63,6 +63,16 @@ app.setErrorHandler((error, request, reply) => {
 
 app.get('/health', async (request) => apiSuccess({ status: 'ok' }, request.id))
 
+app.get('/ready', async (request, reply) => {
+  try {
+    await authRepository().ping()
+    return reply.send(apiSuccess({ status: 'ready', dependencies: { database: 'ok' } }, request.id))
+  } catch (error) {
+    request.log.warn({ err: error }, 'Readiness dependency check failed')
+    return reply.code(503).send(apiFailure('DEPENDENCY_UNAVAILABLE', 'A required service is unavailable.', request.id))
+  }
+})
+
 app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, reply) => {
   assertTrustedOrigin(request)
   const parsed = registerSchema.safeParse(request.body)
