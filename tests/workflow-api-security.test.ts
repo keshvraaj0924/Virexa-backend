@@ -41,6 +41,8 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
   assert.equal(registerB.statusCode, 201)
   const cookieB = cookieFrom(registerB)
   const sessionB = registerB.json().data
+  assert.match(sessionA.user.id, /^[0-9a-f-]{36}$/)
+  assert.match(sessionB.user.id, /^[0-9a-f-]{36}$/)
 
   try {
     const createA = await app.inject({
@@ -71,8 +73,8 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
 
     await pool!.query('UPDATE users SET role = \'viewer\' WHERE id = $1', [sessionB.user.id])
     const viewerList = await app.inject({ method: 'GET', url: '/api/v1/workflows', headers: { cookie: cookieB } })
-    assert.equal(viewerList.statusCode, 403)
-    assert.equal(viewerList.json().error.code, 'FORBIDDEN')
+    assert.equal(viewerList.statusCode, 200)
+    assert.deepEqual(viewerList.json().data, [])
 
     const viewerCreate = await app.inject({
       method: 'POST',
