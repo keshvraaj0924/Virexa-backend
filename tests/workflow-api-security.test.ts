@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { Pool } from 'pg'
@@ -15,7 +16,7 @@ function cookieFrom(response: { headers: Record<string, unknown> }): string {
 }
 
 test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !pool }, async () => {
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const suffix = `${Date.now()}-${randomUUID()}`
   const emailA = `api-security-a-${suffix}@test.invalid`
   const emailB = `api-security-b-${suffix}@test.invalid`
   const password = 'Strong-Test-Password-123!'
