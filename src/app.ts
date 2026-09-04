@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
+import rateLimit from '@fastify/rate-limit'
 import { Pool } from 'pg'
 import { z } from 'zod'
 import { apiFailure, apiSuccess } from './contracts/http.js'
@@ -23,6 +24,12 @@ export const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genR
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
 await app.register(cors, { origin: frontendOrigin(), credentials: true })
+await app.register(rateLimit, {
+  global: false,
+  max: 100,
+  timeWindow: '1 minute',
+  errorResponseBuilder: (request) => apiFailure('RATE_LIMITED', 'Too many requests. Please try again later.', request.id),
+})
 
 const requestStartTimes = new WeakMap<object, bigint>()
 app.addHook('onRequest', async (request) => {
@@ -94,7 +101,9 @@ app.get('/ready', async (request, reply) => {
   }
 })
 
-app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, reply) => {
+app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', {
+  config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+}, async (request, reply) => {
   assertTrustedOrigin(request)
   const parsed = registerSchema.safeParse(request.body)
   if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Registration data is invalid.', request.id, parsed.error.flatten().fieldErrors))
@@ -110,7 +119,9 @@ app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, rep
   }
 })
 
-app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) => {
+app.post<{ Body: LoginRequest }>('/api/v1/auth/login', {
+  config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+}, async (request, reply) => {
   assertTrustedOrigin(request)
   const parsed = loginSchema.safeParse(request.body)
   if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id))
