@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
+import rateLimit from '@fastify/rate-limit'
 import { Pool } from 'pg'
 import { z } from 'zod'
 import { apiFailure, apiSuccess } from './contracts/http.js'
@@ -15,6 +16,7 @@ import { AuditService } from './audit/service.js'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from './workflows/repository.js'
 import { canManageWorkflow, canTransitionWorkflowStatus } from './workflows/policy.js'
 import { assertProductionConfiguration, frontendOrigin } from './config/runtime.js'
+import { markSensitiveResponse } from './http/cache-policy.js'
 
 assertProductionConfiguration()
 
@@ -22,6 +24,12 @@ export const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genR
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
 await app.register(cors, { origin: frontendOrigin(), credentials: true })
+await app.register(rateLimit, {
+  global: false,
+  max: 100,
+  timeWindow: '1 minute',
+  errorResponseBuilder: (request) => apiFailure('RATE_LIMITED', 'Too many requests. Please try again later.', request.id),
+})
 
 const requestStartTimes = new WeakMap<object, bigint>()
 app.addHook('onRequest', async (request) => {
@@ -93,7 +101,9 @@ app.get('/ready', async (request, reply) => {
   }
 })
 
-app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, reply) => {
+app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', {
+  config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+}, async (request, reply) => {
   assertTrustedOrigin(request)
   const parsed = registerSchema.safeParse(request.body)
   if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Registration data is invalid.', request.id, parsed.error.flatten().fieldErrors))
@@ -109,7 +119,9 @@ app.post<{ Body: RegisterRequest }>('/api/v1/auth/register', async (request, rep
   }
 })
 
-app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) => {
+app.post<{ Body: LoginRequest }>('/api/v1/auth/login', {
+  config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+}, async (request, reply) => {
   assertTrustedOrigin(request)
   const parsed = loginSchema.safeParse(request.body)
   if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Email and password are required.', request.id))
@@ -122,6 +134,7 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) =>
 })
 
 app.get('/api/v1/auth/session', async (request, reply) => {
+  markSensitiveResponse(reply)
   const token = request.cookies.virexa_session
   if (!token) return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
   const session = await authRepository().getSession(token)
@@ -142,12 +155,14 @@ app.post('/api/v1/auth/logout', async (request, reply) => {
 })
 
 app.get('/api/v1/me', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'platform:read')
   return reply.send(apiSuccess(context, request.id))
 })
 
 app.get('/api/v1/audit/events', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'audit:read')
   const parsed = auditQuerySchema.safeParse(request.query ?? {})
@@ -157,6 +172,7 @@ app.get('/api/v1/audit/events', async (request, reply) => {
 })
 
 app.get('/api/v1/workflows', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'workflow:read')
   const parsed = workflowQuerySchema.safeParse(request.query ?? {})
@@ -181,6 +197,7 @@ app.post<{ Body: CreateWorkflowRequest }>('/api/v1/workflows', async (request, r
 })
 
 app.get<{ Params: { workflowId: string } }>('/api/v1/workflows/:workflowId', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'workflow:read')
   const parsedId = workflowIdSchema.safeParse(request.params.workflowId)
