@@ -15,6 +15,7 @@ import { AuditService } from './audit/service.js'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from './workflows/repository.js'
 import { canManageWorkflow, canTransitionWorkflowStatus } from './workflows/policy.js'
 import { assertProductionConfiguration, frontendOrigin } from './config/runtime.js'
+import { markSensitiveResponse } from './http/cache-policy.js'
 
 assertProductionConfiguration()
 
@@ -122,6 +123,7 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', async (request, reply) =>
 })
 
 app.get('/api/v1/auth/session', async (request, reply) => {
+  markSensitiveResponse(reply)
   const token = request.cookies.virexa_session
   if (!token) return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id))
   const session = await authRepository().getSession(token)
@@ -142,12 +144,14 @@ app.post('/api/v1/auth/logout', async (request, reply) => {
 })
 
 app.get('/api/v1/me', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'platform:read')
   return reply.send(apiSuccess(context, request.id))
 })
 
 app.get('/api/v1/audit/events', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'audit:read')
   const parsed = auditQuerySchema.safeParse(request.query ?? {})
@@ -157,6 +161,7 @@ app.get('/api/v1/audit/events', async (request, reply) => {
 })
 
 app.get('/api/v1/workflows', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'workflow:read')
   const parsed = workflowQuerySchema.safeParse(request.query ?? {})
@@ -181,6 +186,7 @@ app.post<{ Body: CreateWorkflowRequest }>('/api/v1/workflows', async (request, r
 })
 
 app.get<{ Params: { workflowId: string } }>('/api/v1/workflows/:workflowId', async (request, reply) => {
+  markSensitiveResponse(reply)
   const context = await requireAuthenticated(request, authRepository())
   requirePermission(context, 'workflow:read')
   const parsedId = workflowIdSchema.safeParse(request.params.workflowId)
