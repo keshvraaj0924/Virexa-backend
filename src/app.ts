@@ -15,12 +15,17 @@ import { requireAuthenticated, requireAnyPermission, requirePermission, Authenti
 import { AuditService } from './audit/service.js'
 import { IdempotencyKeyReuseError, PostgresWorkflowRepository } from './workflows/repository.js'
 import { canManageWorkflow, canTransitionWorkflowStatus } from './workflows/policy.js'
-import { assertProductionConfiguration, frontendOrigin } from './config/runtime.js'
+import { assertProductionConfiguration, frontendOrigin, trustProxyHops } from './config/runtime.js'
 import { markSensitiveResponse } from './http/cache-policy.js'
 
 assertProductionConfiguration()
 
-export const app = Fastify({ logger: true, requestIdHeader: 'x-request-id', genReqId: () => randomUUID() })
+export const app = Fastify({
+  logger: true,
+  requestIdHeader: 'x-request-id',
+  genReqId: () => randomUUID(),
+  trustProxy: trustProxyHops(),
+})
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
 await app.register(cors, { origin: frontendOrigin(), credentials: true })
