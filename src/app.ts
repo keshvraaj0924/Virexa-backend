@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import Fastify from 'fastify'
+import Fastify, { type RawServerDefault } from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import helmet from '@fastify/helmet'
@@ -20,11 +20,11 @@ import { markSensitiveResponse } from './http/cache-policy.js'
 
 assertProductionConfiguration()
 
-export const app = Fastify({
+export const app = Fastify<RawServerDefault>({
   logger: true,
   requestIdHeader: 'x-request-id',
   genReqId: () => randomUUID(),
-  trustProxy: trustProxyHops(),
+  trustProxy: (address, index) => index < trustProxyHops(),
 })
 await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
