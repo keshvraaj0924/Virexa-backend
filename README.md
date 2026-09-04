@@ -11,11 +11,16 @@ Enterprise API foundation for Virexa.
 - Structured request completion telemetry
 - RBAC enforced server-side for every protected resource
 - Authentication designed around secure, HttpOnly session cookies rather than browser-managed bearer secrets
+- Authenticated data responses explicitly disable browser/intermediary caching
 - Auditability and least-privilege access as first-class concerns
 
 ## Observability
 
 Every request receives a correlation ID. On completion, the API emits a structured `Request completed` log containing the request ID, HTTP method, matched route template, status code, and elapsed duration in milliseconds. Request bodies, cookies, authorization headers, query strings, and response payloads are intentionally excluded from this telemetry to avoid leaking credentials or tenant data.
+
+## Authenticated response caching
+
+Responses that expose authenticated identity, audit, or workflow data are marked `Cache-Control: private, no-store, max-age=0`, with `Pragma: no-cache` and `Expires: 0`. This prevents browser and intermediary caches from retaining tenant-scoped operational data or session context. Public liveness/readiness responses are not subject to this application-level sensitive-data policy.
 
 ## Operational endpoints
 
@@ -55,7 +60,7 @@ Request:
 
 ### `GET /api/v1/auth/session`
 
-Returns the authenticated user's session and organization context.
+Returns the authenticated user's session and organization context. The response is explicitly non-cacheable.
 
 ### `POST /api/v1/auth/logout`
 
