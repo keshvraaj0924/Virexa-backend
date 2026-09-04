@@ -8,9 +8,14 @@ Enterprise API foundation for Virexa.
 - Versioned endpoints under `/api/v1`
 - Consistent success/error envelopes
 - Request correlation IDs
+- Structured request completion telemetry
 - RBAC enforced server-side for every protected resource
 - Authentication designed around secure, HttpOnly session cookies rather than browser-managed bearer secrets
 - Auditability and least-privilege access as first-class concerns
+
+## Observability
+
+Every request receives a correlation ID. On completion, the API emits a structured `Request completed` log containing the request ID, HTTP method, matched route template, status code, and elapsed duration in milliseconds. Request bodies, cookies, authorization headers, query strings, and response payloads are intentionally excluded from this telemetry to avoid leaking credentials or tenant data.
 
 ## Operational endpoints
 
