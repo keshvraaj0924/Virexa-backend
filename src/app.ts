@@ -23,6 +23,23 @@ await app.register(helmet, { contentSecurityPolicy: false })
 await app.register(cookie)
 await app.register(cors, { origin: frontendOrigin(), credentials: true })
 
+const requestStartTimes = new WeakMap<object, bigint>()
+app.addHook('onRequest', async (request) => {
+  requestStartTimes.set(request, process.hrtime.bigint())
+})
+app.addHook('onResponse', async (request, reply) => {
+  const startedAt = requestStartTimes.get(request)
+  if (startedAt === undefined) return
+  const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
+  request.log.info({
+    requestId: request.id,
+    method: request.method,
+    route: request.routeOptions.url,
+    statusCode: reply.statusCode,
+    durationMs: Number(durationMs.toFixed(3)),
+  }, 'Request completed')
+})
+
 const registerSchema = z.object({ displayName: z.string().trim().min(2).max(120), email: z.string().trim().email().max(320), password: z.string().min(12).max(128), organizationName: z.string().trim().min(2).max(160) }).strict()
 const loginSchema = z.object({ email: z.string().trim().email().max(320), password: z.string().min(1).max(128) }).strict()
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) }).strict()
