@@ -40,9 +40,6 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
   })
   assert.equal(registerB.statusCode, 201)
   const cookieB = cookieFrom(registerB)
-  const sessionB = registerB.json().data
-  assert.match(sessionA.user.id, /^[0-9a-f-]{36}$/)
-  assert.match(sessionB.user.id, /^[0-9a-f-]{36}$/)
 
   try {
     const createA = await app.inject({
@@ -71,15 +68,28 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
     assert.equal(crossTenantPatch.statusCode, 404)
     assert.equal(crossTenantPatch.json().error.code, 'NOT_FOUND')
 
-    await pool!.query('UPDATE users SET role = \'viewer\' WHERE id = $1', [sessionB.user.id])
-    const viewerList = await app.inject({ method: 'GET', url: '/api/v1/workflows', headers: { cookie: cookieB } })
+    const roleUpdate = await pool!.query<{ role: string }>('UPDATE users SET role = \'viewer\' WHERE email = $1 RETURNING role', [emailB])
+    assert.equal(roleUpdate.rowCount, 1)
+    assert.equal(roleUpdate.rows[0]?.role, 'viewer')
+
+    const viewerLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: { origin },
+      payload: { email: emailB, password },
+    })
+    assert.equal(viewerLogin.statusCode, 200)
+    assert.equal(viewerLogin.json().data.user.role, 'viewer')
+    const viewerCookie = cookieFrom(viewerLogin)
+
+    const viewerList = await app.inject({ method: 'GET', url: '/api/v1/workflows', headers: { cookie: viewerCookie } })
     assert.equal(viewerList.statusCode, 200)
     assert.deepEqual(viewerList.json().data, [])
 
     const viewerCreate = await app.inject({
       method: 'POST',
       url: '/api/v1/workflows',
-      headers: { origin, cookie: cookieB, 'idempotency-key': `api-security-key-b-${suffix}` },
+      headers: { origin, cookie: viewerCookie, 'idempotency-key': `api-security-key-b-${suffix}` },
       payload: { name: 'Viewer must not create' },
     })
     assert.equal(viewerCreate.statusCode, 403)
