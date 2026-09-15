@@ -40,7 +40,6 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
   })
   assert.equal(registerB.statusCode, 201)
   const cookieB = cookieFrom(registerB)
-  const sessionB = registerB.json().data
 
   try {
     const createA = await app.inject({
@@ -69,7 +68,8 @@ test('authenticated workflow API enforces tenant isolation and RBAC', { skip: !p
     assert.equal(crossTenantPatch.statusCode, 404)
     assert.equal(crossTenantPatch.json().error.code, 'NOT_FOUND')
 
-    const roleUpdate = await pool!.query<{ role: string }>('UPDATE users SET role = \'viewer\' WHERE id = $1 RETURNING role', [sessionB.user.id])
+    const roleUpdate = await pool!.query<{ role: string }>('UPDATE users SET role = \'viewer\' WHERE email = $1 RETURNING role', [emailB])
+    assert.equal(roleUpdate.rowCount, 1)
     assert.equal(roleUpdate.rows[0]?.role, 'viewer')
 
     const viewerLogin = await app.inject({
