@@ -70,7 +70,7 @@ jobs:
       - name: Test gate
         if: always()
         run: |
-          if [ "${{ steps.unit-tests.outcome }}" != "success" ] || [ "${{ steps.integration-tests.outcome }}" != "success" ]; then
+          if [ "${{ steps.unit-tests.conclusion }}" != "success" ] || [ "${{ steps.integration-tests.conclusion }}" != "success" ]; then
             echo "One or more test suites failed. See the backend-test-output artifact for complete diagnostics."
             exit 1
           fi
