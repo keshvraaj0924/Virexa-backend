@@ -37,7 +37,11 @@ test('workflow repository never exposes one tenant resources to another tenant',
     assert.equal(await repository.getById(organizationBId, workflowA.workflow.id), null)
     assert.deepEqual(await repository.list(organizationBId, 50), [])
     assert.equal(
-      await repository.update(organizationBId, workflowA.workflow.id, { name: 'Cross-tenant overwrite' }),
+      await repository.update(
+        organizationBId,
+        workflowA.workflow.id,
+        { expectedVersion: workflowA.workflow.version, name: 'Cross-tenant overwrite' },
+      ),
       null,
     )
 
