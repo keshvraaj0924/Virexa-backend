@@ -7,22 +7,19 @@ export interface WorkflowRepository {
   createIdempotent(organizationId: string, userId: string, input: CreateWorkflowRequest, idempotencyKey: string): Promise<{ workflow: Workflow; replayed: boolean }>
   list(organizationId: string, limit: number): Promise<Workflow[]>
   getById(organizationId: string, workflowId: string): Promise<Workflow | null>
-  update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus): Promise<Workflow | null>
+  update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest): Promise<Workflow | null>
   close?(): Promise<void>
 }
 
 export class IdempotencyKeyReuseError extends Error {
-  constructor() {
-    super('The idempotency key was already used with a different request.')
-    this.name = 'IDEMPOTENCY_KEY_REUSED'
-  }
+  constructor() { super('The idempotency key was already used with a different request.'); this.name = 'IDEMPOTENCY_KEY_REUSED' }
 }
 
 function mapWorkflow(row: any): Workflow {
-  return { id: row.id, organizationId: row.organization_id, createdByUserId: row.created_by_user_id, name: row.name, description: row.description ?? null, status: row.status as WorkflowStatus, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() }
+  return { id: row.id, organizationId: row.organization_id, createdByUserId: row.created_by_user_id, name: row.name, description: row.description ?? null, status: row.status as WorkflowStatus, version: row.version, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() }
 }
 
-const columns = 'id, organization_id, created_by_user_id, name, description, status, created_at, updated_at'
+const columns = 'id, organization_id, created_by_user_id, name, description, status, version, created_at, updated_at'
 
 function normalizedCreatePayload(input: CreateWorkflowRequest): CreateWorkflowRequest {
   return { name: input.name.trim(), description: input.description?.trim() || null }
@@ -47,61 +44,40 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-
-      // Reserve the tenant-scoped key. A concurrent INSERT waits on the unique
-      // constraint and then observes the committed reservation without requiring
-      // an application-level lock or a no-op UPDATE.
       const inserted = await client.query(
         `INSERT INTO workflow_idempotency_keys (organization_id, idempotency_key, request_hash)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (organization_id, idempotency_key) DO NOTHING
-         RETURNING request_hash, workflow_id`,
-        [organizationId, idempotencyKey, hash],
+         VALUES ($1, $2, $3) ON CONFLICT (organization_id, idempotency_key) DO NOTHING
+         RETURNING request_hash, workflow_id`, [organizationId, idempotencyKey, hash],
       )
-
       let keyRecord = inserted.rows[0]
       const replayed = !keyRecord
-
       if (!keyRecord) {
         const existing = await client.query(
-          `SELECT request_hash, workflow_id
-           FROM workflow_idempotency_keys
-           WHERE organization_id = $1 AND idempotency_key = $2
-           FOR UPDATE`,
-          [organizationId, idempotencyKey],
+          `SELECT request_hash, workflow_id FROM workflow_idempotency_keys
+           WHERE organization_id = $1 AND idempotency_key = $2 FOR UPDATE`, [organizationId, idempotencyKey],
         )
         keyRecord = existing.rows[0]
         if (!keyRecord) throw new Error('Idempotency reservation disappeared before it could be read')
       }
-
       if (keyRecord.request_hash !== hash) throw new IdempotencyKeyReuseError()
-
       if (keyRecord.workflow_id) {
         const existing = await client.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 AND id = $2`, [organizationId, keyRecord.workflow_id])
         if (!existing.rows[0]) throw new Error('Idempotency record references a missing workflow')
         await client.query('COMMIT')
         return { workflow: mapWorkflow(existing.rows[0]), replayed: true }
       }
-
       const workflowResult = await client.query(
         `INSERT INTO workflows (organization_id, created_by_user_id, name, description)
-         VALUES ($1, $2, $3, $4) RETURNING ${columns}`,
-        [organizationId, userId, normalized.name, normalized.description],
+         VALUES ($1, $2, $3, $4) RETURNING ${columns}`, [organizationId, userId, normalized.name, normalized.description],
       )
       const workflow = mapWorkflow(workflowResult.rows[0])
-      await client.query(
-        `UPDATE workflow_idempotency_keys SET workflow_id = $3
-         WHERE organization_id = $1 AND idempotency_key = $2`,
-        [organizationId, idempotencyKey, workflow.id],
-      )
+      await client.query(`UPDATE workflow_idempotency_keys SET workflow_id = $3 WHERE organization_id = $1 AND idempotency_key = $2`, [organizationId, idempotencyKey, workflow.id])
       await client.query('COMMIT')
       return { workflow, replayed }
     } catch (error) {
       await client.query('ROLLBACK')
       throw error
-    } finally {
-      client.release()
-    }
+    } finally { client.release() }
   }
 
   async list(organizationId: string, limit: number) {
@@ -114,20 +90,20 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
   }
 
-  async update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus) {
+  async update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest) {
     const fields: string[] = []
-    const values: unknown[] = [organizationId, workflowId]
+    const values: unknown[] = [organizationId, workflowId, input.expectedVersion]
     if (input.name !== undefined) { values.push(input.name.trim()); fields.push(`name = $${values.length}`) }
     if (input.description !== undefined) { values.push(input.description?.trim() || null); fields.push(`description = $${values.length}`) }
     if (input.status !== undefined) { values.push(input.status); fields.push(`status = $${values.length}`) }
     if (fields.length === 0) return this.getById(organizationId, workflowId)
-    fields.push('updated_at = now()')
-    const statusPredicate = expectedStatus === undefined ? '' : ` AND status = $${values.push(expectedStatus)}`
-    const result = await this.pool.query(`UPDATE workflows SET ${fields.join(', ')} WHERE organization_id = $1 AND id = $2${statusPredicate} RETURNING ${columns}`, values)
+    fields.push('version = version + 1', 'updated_at = now()')
+    const result = await this.pool.query(
+      `UPDATE workflows SET ${fields.join(', ')} WHERE organization_id = $1 AND id = $2 AND version = $3 RETURNING ${columns}`,
+      values,
+    )
     return result.rows[0] ? mapWorkflow(result.rows[0]) : null
   }
 
-  async close() {
-    await this.pool.end()
-  }
+  async close() { await this.pool.end() }
 }
