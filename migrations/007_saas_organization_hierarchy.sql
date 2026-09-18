@@ -2,6 +2,11 @@
 -- Organization remains the current tenant security boundary. Child resources carry
 -- organization_id explicitly so every query can be tenant-scoped without joins.
 
+-- Composite tenant foreign keys need a matching unique key on users.
+-- This is backward compatible with the existing user primary key.
+CREATE UNIQUE INDEX IF NOT EXISTS users_org_id_uq
+  ON users (organization_id, id);
+
 CREATE TABLE IF NOT EXISTS branches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
@@ -113,11 +118,6 @@ CREATE TABLE IF NOT EXISTS user_persona_assignments (
     REFERENCES personas (organization_id, id)
     ON DELETE CASCADE
 );
-
--- Composite tenant foreign keys above require a matching unique key on users.
--- Adding it here is backward compatible with the existing primary key.
-CREATE UNIQUE INDEX IF NOT EXISTS users_org_id_uq
-  ON users (organization_id, id);
 
 CREATE INDEX IF NOT EXISTS branches_org_status_idx
   ON branches (organization_id, status, created_at DESC);
