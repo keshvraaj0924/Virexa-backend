@@ -88,6 +88,15 @@ app.post<{ Body: LoginRequest }>('/api/v1/auth/login', { config: { rateLimit: { 
 })
 app.get('/api/v1/auth/session', async (request, reply) => { markSensitiveResponse(reply); const token = request.cookies.virexa_session; if (!token) return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id)); const session = await authRepository().getSession(token); if (!session) { reply.clearCookie('virexa_session', { path: '/' }); return reply.code(401).send(apiFailure('UNAUTHENTICATED', 'Authentication is required.', request.id)) }; return reply.send(apiSuccess(session, request.id)) })
 app.post('/api/v1/auth/logout', async (request, reply) => { assertTrustedOrigin(request); const token = request.cookies.virexa_session; if (token) { const session = await authRepository().getSession(token); await authRepository().revokeSession(token); if (session) await audits().record({ organizationId: session.user.organizationId, actorUserId: session.user.id, action: 'identity.logout', resourceType: 'session', requestId: request.id }) }; reply.clearCookie('virexa_session', { path: '/' }); return reply.send(apiSuccess({ success: true }, request.id)) })
+app.post('/api/v1/auth/sessions/revoke-others', async (request, reply) => {
+  assertTrustedOrigin(request)
+  const token = request.cookies.virexa_session
+  if (!token) throw new AuthenticationRequiredError()
+  const context = await requireAuthenticated(request, authRepository())
+  const revokedCount = await authRepository().revokeOtherSessions(token)
+  await audits().record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'identity.other_sessions_revoked', resourceType: 'session', requestId: request.id, metadata: { revokedCount } })
+  return reply.send(apiSuccess({ revokedCount }, request.id))
+})
 app.get('/api/v1/me', async (request, reply) => { markSensitiveResponse(reply); const context = await requireAuthenticated(request, authRepository()); requirePermission(context, 'platform:read'); return reply.send(apiSuccess(context, request.id)) })
 app.get('/api/v1/audit/events', async (request, reply) => { markSensitiveResponse(reply); const context = await requireAuthenticated(request, authRepository()); requirePermission(context, 'audit:read'); const parsed = auditQuerySchema.safeParse(request.query ?? {}); if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Audit query parameters are invalid.', request.id)); return reply.send(apiSuccess(await audits().listForOrganization(context.user.organizationId, parsed.data.limit), request.id)) })
 app.get('/api/v1/workflows', async (request, reply) => { markSensitiveResponse(reply); const context = await requireAuthenticated(request, authRepository()); requirePermission(context, 'workflow:read'); const parsed = workflowQuerySchema.safeParse(request.query ?? {}); if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Workflow query parameters are invalid.', request.id)); return reply.send(apiSuccess(await workflows().list(context.user.organizationId, parsed.data.limit), request.id)) })
