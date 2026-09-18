@@ -84,6 +84,15 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async login(email: string, password: string) {
+    const candidate = await this.pool.query(
+      `SELECT u.id AS user_id, u.password_hash
+       FROM users u
+       WHERE u.email = lower($1) AND u.disabled_at IS NULL`,
+      [email],
+    )
+    const candidateRow = candidate.rows[0]
+    if (!candidateRow || !(await verifyPassword(password, candidateRow.password_hash))) return null
+
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
@@ -91,12 +100,12 @@ export class PostgresAuthRepository implements AuthRepository {
         `SELECT u.id AS user_id, u.email, u.display_name, u.password_hash, u.role,
                 o.id AS organization_id, o.name AS organization_name
          FROM users u JOIN organizations o ON o.id = u.organization_id
-         WHERE u.email = lower($1) AND u.disabled_at IS NULL
+         WHERE u.id = $1 AND u.disabled_at IS NULL AND u.password_hash = $2
          FOR UPDATE OF u`,
-        [email],
+        [candidateRow.user_id, candidateRow.password_hash],
       )
       const row = result.rows[0]
-      if (!row || !(await verifyPassword(password, row.password_hash))) {
+      if (!row) {
         await client.query('ROLLBACK')
         return null
       }
