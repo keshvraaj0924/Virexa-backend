@@ -8,6 +8,7 @@ export interface Workflow {
   name: string
   description: string | null
   status: WorkflowStatus
+  version: number
   createdAt: string
   updatedAt: string
 }
@@ -18,6 +19,7 @@ export interface CreateWorkflowRequest {
 }
 
 export interface UpdateWorkflowRequest {
+  expectedVersion: number
   name?: string
   description?: string | null
   status?: WorkflowStatus

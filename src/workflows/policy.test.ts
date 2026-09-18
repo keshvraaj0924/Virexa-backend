@@ -5,7 +5,7 @@ import type { Workflow } from '../contracts/workflows.js'
 
 const workflow: Workflow = {
   id: 'workflow-1', organizationId: 'org-1', createdByUserId: 'user-1', name: 'Invoice approval', description: null,
-  status: 'draft', createdAt: '2026-09-02T00:00:00.000Z', updatedAt: '2026-09-02T00:00:00.000Z',
+  status: 'draft', version: 1, createdAt: '2026-09-02T00:00:00.000Z', updatedAt: '2026-09-02T00:00:00.000Z',
 }
 
 function context(userId: string, permissions: AuthenticatedContext['permissions'], organizationId = 'org-1'): AuthenticatedContext {
