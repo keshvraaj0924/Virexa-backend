@@ -11,6 +11,7 @@ export interface AuthRepository {
   login(email: string, password: string): Promise<(AuthSession & { sessionToken: string }) | null>
   getSession(token: string): Promise<AuthSession | null>
   revokeSession(token: string): Promise<void>
+  revokeOtherSessions(token: string): Promise<number>
   ping(): Promise<void>
   close?(): Promise<void>
 }
@@ -134,6 +135,23 @@ export class PostgresAuthRepository implements AuthRepository {
 
   async revokeSession(token: string) {
     await this.pool.query('UPDATE sessions SET revoked_at = now() WHERE token_digest = $1 AND revoked_at IS NULL', [tokenDigest(token)])
+  }
+
+  async revokeOtherSessions(token: string) {
+    const digest = tokenDigest(token)
+    const result = await this.pool.query(
+      `UPDATE sessions
+       SET revoked_at = now()
+       WHERE user_id = (
+         SELECT user_id FROM sessions
+         WHERE token_digest = $1 AND revoked_at IS NULL AND expires_at > now()
+       )
+         AND token_digest <> $1
+         AND revoked_at IS NULL
+         AND expires_at > now()`,
+      [digest],
+    )
+    return result.rowCount ?? 0
   }
 
   async ping() {
