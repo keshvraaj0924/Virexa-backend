@@ -30,7 +30,7 @@ function toUser(row: any): UserSummary {
   }
 }
 
-async function createBoundedSession(client: Pool | PoolClient, userId: string): Promise<{ sessionToken: string; expiresAt: string }> {
+async function createBoundedSession(client: PoolClient, userId: string): Promise<{ sessionToken: string; expiresAt: string }> {
   const token = createSessionToken()
   const session = await client.query(
     `INSERT INTO sessions (user_id, token_digest, expires_at)
@@ -84,17 +84,40 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async login(email: string, password: string) {
-    const result = await this.pool.query(
-      `SELECT u.id AS user_id, u.email, u.display_name, u.password_hash, u.role,
-              o.id AS organization_id, o.name AS organization_name
-       FROM users u JOIN organizations o ON o.id = u.organization_id
+    const candidate = await this.pool.query(
+      `SELECT u.id AS user_id, u.password_hash
+       FROM users u
        WHERE u.email = lower($1) AND u.disabled_at IS NULL`,
       [email],
     )
-    const row = result.rows[0]
-    if (!row || !(await verifyPassword(password, row.password_hash))) return null
-    const session = await createBoundedSession(this.pool, row.user_id)
-    return { user: toUser(row), expiresAt: session.expiresAt, sessionToken: session.sessionToken }
+    const candidateRow = candidate.rows[0]
+    if (!candidateRow || !(await verifyPassword(password, candidateRow.password_hash))) return null
+
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await client.query(
+        `SELECT u.id AS user_id, u.email, u.display_name, u.password_hash, u.role,
+                o.id AS organization_id, o.name AS organization_name
+         FROM users u JOIN organizations o ON o.id = u.organization_id
+         WHERE u.id = $1 AND u.disabled_at IS NULL AND u.password_hash = $2
+         FOR UPDATE OF u`,
+        [candidateRow.user_id, candidateRow.password_hash],
+      )
+      const row = result.rows[0]
+      if (!row) {
+        await client.query('ROLLBACK')
+        return null
+      }
+      const session = await createBoundedSession(client, row.user_id)
+      await client.query('COMMIT')
+      return { user: toUser(row), expiresAt: session.expiresAt, sessionToken: session.sessionToken }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   async getSession(token: string) {
