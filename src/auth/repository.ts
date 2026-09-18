@@ -12,6 +12,7 @@ export interface AuthRepository {
   getSession(token: string): Promise<AuthSession | null>
   listActiveSessions(token: string): Promise<SessionSummary[]>
   revokeSession(token: string): Promise<void>
+  revokeOwnedSession(token: string, sessionId: string): Promise<{ revoked: boolean; current: boolean }>
   revokeOtherSessions(token: string): Promise<number>
   ping(): Promise<void>
   close?(): Promise<void>
@@ -161,6 +162,28 @@ export class PostgresAuthRepository implements AuthRepository {
 
   async revokeSession(token: string) {
     await this.pool.query('UPDATE sessions SET revoked_at = now() WHERE token_digest = $1 AND revoked_at IS NULL', [tokenDigest(token)])
+  }
+
+  async revokeOwnedSession(token: string, sessionId: string) {
+    const digest = tokenDigest(token)
+    const result = await this.pool.query<{ current: boolean }>(
+      `UPDATE sessions target
+       SET revoked_at = now()
+       WHERE target.id = $2
+         AND target.user_id = (
+           SELECT current_session.user_id
+           FROM sessions current_session
+           WHERE current_session.token_digest = $1
+             AND current_session.revoked_at IS NULL
+             AND current_session.expires_at > now()
+         )
+         AND target.revoked_at IS NULL
+         AND target.expires_at > now()
+       RETURNING target.token_digest = $1 AS current`,
+      [digest, sessionId],
+    )
+    const row = result.rows[0]
+    return { revoked: Boolean(row), current: row?.current ?? false }
   }
 
   async revokeOtherSessions(token: string) {
