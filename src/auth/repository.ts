@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
-import { Pool } from 'pg'
+import { Pool, type PoolClient } from 'pg'
 import type { AuthSession, UserSummary, UserRole } from '../contracts/auth.js'
 import { createSessionToken, hashPassword, verifyPassword } from './crypto.js'
+
+const SESSION_LIFETIME_HOURS = 8
+const MAX_ACTIVE_SESSIONS_PER_USER = 5
 
 export interface AuthRepository {
   register(input: { displayName: string; email: string; password: string; organizationName: string }): Promise<AuthSession & { sessionToken: string }>
@@ -27,6 +30,32 @@ function toUser(row: any): UserSummary {
   }
 }
 
+async function createBoundedSession(client: Pool | PoolClient, userId: string): Promise<{ sessionToken: string; expiresAt: string }> {
+  const token = createSessionToken()
+  const session = await client.query(
+    `INSERT INTO sessions (user_id, token_digest, expires_at)
+     VALUES ($1, $2, now() + ($3 * interval '1 hour')) RETURNING expires_at`,
+    [userId, tokenDigest(token), SESSION_LIFETIME_HOURS],
+  )
+
+  await client.query(
+    `UPDATE sessions
+     SET revoked_at = now()
+     WHERE user_id = $1
+       AND revoked_at IS NULL
+       AND expires_at > now()
+       AND id NOT IN (
+         SELECT id FROM sessions
+         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2
+       )`,
+    [userId, MAX_ACTIVE_SESSIONS_PER_USER],
+  )
+
+  return { sessionToken: token, expiresAt: session.rows[0].expires_at.toISOString() }
+}
+
 export class PostgresAuthRepository implements AuthRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -42,15 +71,10 @@ export class PostgresAuthRepository implements AuthRepository {
          RETURNING id AS user_id, email, display_name, role, organization_id`,
         [organization.rows[0].id, input.email, input.displayName.trim(), passwordHash],
       )
-      const token = createSessionToken()
-      const session = await client.query(
-        `INSERT INTO sessions (user_id, token_digest, expires_at)
-         VALUES ($1, $2, now() + interval '8 hours') RETURNING expires_at`,
-        [user.rows[0].user_id, tokenDigest(token)],
-      )
+      const session = await createBoundedSession(client, user.rows[0].user_id)
       await client.query('COMMIT')
       const summary = toUser({ ...user.rows[0], organization_name: organization.rows[0].name })
-      return { user: summary, expiresAt: session.rows[0].expires_at.toISOString(), sessionToken: token }
+      return { user: summary, expiresAt: session.expiresAt, sessionToken: session.sessionToken }
     } catch (error) {
       await client.query('ROLLBACK')
       throw error
@@ -69,13 +93,8 @@ export class PostgresAuthRepository implements AuthRepository {
     )
     const row = result.rows[0]
     if (!row || !(await verifyPassword(password, row.password_hash))) return null
-    const token = createSessionToken()
-    const session = await this.pool.query(
-      `INSERT INTO sessions (user_id, token_digest, expires_at)
-       VALUES ($1, $2, now() + interval '8 hours') RETURNING expires_at`,
-      [row.user_id, tokenDigest(token)],
-    )
-    return { user: toUser(row), expiresAt: session.rows[0].expires_at.toISOString(), sessionToken: token }
+    const session = await createBoundedSession(this.pool, row.user_id)
+    return { user: toUser(row), expiresAt: session.expiresAt, sessionToken: session.sessionToken }
   }
 
   async getSession(token: string) {
