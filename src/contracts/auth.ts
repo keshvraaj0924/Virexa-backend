@@ -38,6 +38,17 @@ export interface AuthSession {
   expiresAt: string
 }
 
+export interface SessionSummary {
+  id: string
+  createdAt: string
+  expiresAt: string
+  current: boolean
+}
+
+export interface SessionInventory {
+  sessions: SessionSummary[]
+}
+
 export interface AuthenticatedContext extends AuthSession {
   permissions: readonly Permission[]
 }
