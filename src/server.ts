@@ -1,7 +1,39 @@
+import { Pool } from 'pg'
 import { app } from './app.js'
+import { createAuthRepository } from './auth/repository.js'
+import { PostgresOrganizationRepository } from './organization/repository.js'
+import { organizationRoutes } from './organization/routes.js'
 
 const port = Number(process.env.PORT ?? 4000)
 const host = process.env.HOST ?? '0.0.0.0'
+
+function databaseUrl(): string {
+  const value = process.env.DATABASE_URL
+  if (!value) {
+    throw new Error('DATABASE_URL is not configured')
+  }
+  return value
+}
+
+// Organization administration is registered at the composition root so its
+// dependencies are explicit and independently replaceable in tests. Tenant
+// scope remains derived by organizationRoutes from the authenticated session.
+const organizationAuthRepository = createAuthRepository(databaseUrl())
+const organizationRepository = new PostgresOrganizationRepository(
+  new Pool({ connectionString: databaseUrl(), max: 5 }),
+)
+
+await app.register(organizationRoutes, {
+  authRepository: organizationAuthRepository,
+  organizationRepository,
+})
+
+app.addHook('onClose', async () => {
+  await Promise.all([
+    organizationAuthRepository.close?.(),
+    organizationRepository.close(),
+  ])
+})
 
 await app.listen({ port, host })
 
