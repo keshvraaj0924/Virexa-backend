@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { Pool, type PoolClient } from 'pg'
-import type { AuthSession, UserSummary, UserRole } from '../contracts/auth.js'
+import type { AuthSession, SessionSummary, UserSummary, UserRole } from '../contracts/auth.js'
 import { createSessionToken, hashPassword, verifyPassword } from './crypto.js'
 
 const SESSION_LIFETIME_HOURS = 8
@@ -10,6 +10,7 @@ export interface AuthRepository {
   register(input: { displayName: string; email: string; password: string; organizationName: string }): Promise<AuthSession & { sessionToken: string }>
   login(email: string, password: string): Promise<(AuthSession & { sessionToken: string }) | null>
   getSession(token: string): Promise<AuthSession | null>
+  listActiveSessions(token: string): Promise<SessionSummary[]>
   revokeSession(token: string): Promise<void>
   revokeOtherSessions(token: string): Promise<number>
   ping(): Promise<void>
@@ -131,6 +132,31 @@ export class PostgresAuthRepository implements AuthRepository {
     )
     const row = result.rows[0]
     return row ? { user: toUser(row), expiresAt: row.expires_at.toISOString() } : null
+  }
+
+  async listActiveSessions(token: string) {
+    const digest = tokenDigest(token)
+    const result = await this.pool.query(
+      `SELECT s.id, s.created_at, s.expires_at, s.token_digest = $1 AS current
+       FROM sessions s
+       WHERE s.user_id = (
+         SELECT current_session.user_id
+         FROM sessions current_session
+         WHERE current_session.token_digest = $1
+           AND current_session.revoked_at IS NULL
+           AND current_session.expires_at > now()
+       )
+         AND s.revoked_at IS NULL
+         AND s.expires_at > now()
+       ORDER BY current DESC, s.created_at DESC, s.id DESC`,
+      [digest],
+    )
+    return result.rows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at.toISOString(),
+      expiresAt: row.expires_at.toISOString(),
+      current: row.current,
+    }))
   }
 
   async revokeSession(token: string) {
