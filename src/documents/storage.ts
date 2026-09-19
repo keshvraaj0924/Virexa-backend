@@ -16,13 +16,31 @@ export interface DocumentUploadTarget {
   requiredHeaders: Readonly<Record<string, string>>
 }
 
+export interface DocumentStoredObject {
+  objectKey: string
+  mediaType: string
+  sizeBytes: number
+  checksumSha256: string
+}
+
 /**
- * Provider boundary for durable document binaries. Implementations must issue
- * short-lived, write-only upload targets and must never derive tenant scope
- * from caller-controlled object keys.
+ * Provider boundary for issuing durable document uploads. Implementations must
+ * issue short-lived, write-only upload targets and must never derive tenant
+ * scope from caller-controlled object keys.
  */
 export interface DocumentObjectStorage {
   createUploadTarget(descriptor: DocumentUploadDescriptor): Promise<DocumentUploadTarget>
+}
+
+/**
+ * Completion boundary used after the client has uploaded bytes. A production
+ * provider must read metadata from the object store itself; API callers cannot
+ * assert that an upload succeeded. deleteObject is required for compensating
+ * cleanup of abandoned or rejected objects.
+ */
+export interface DocumentObjectStorageLifecycle extends DocumentObjectStorage {
+  inspectObject(objectKey: string): Promise<DocumentStoredObject | null>
+  deleteObject(objectKey: string): Promise<void>
 }
 
 const MAX_UPLOAD_TARGET_TTL_MS = 15 * 60 * 1000
@@ -79,4 +97,21 @@ export function assertUploadTarget(
   if (headers['content-type'] !== descriptor.mediaType) throw new Error('Document upload target must bind content type')
   if (headers['content-length'] !== String(descriptor.sizeBytes)) throw new Error('Document upload target must bind content length')
   if (headers['x-virexa-sha256'] !== descriptor.checksumSha256) throw new Error('Document upload target must bind SHA-256 integrity metadata')
+}
+
+/**
+ * Verifies the durable object using metadata observed by the storage provider.
+ * Completion must fail closed if the object is missing or if any immutable
+ * property differs from the server-recorded intake descriptor.
+ */
+export function assertStoredObject(
+  descriptor: DocumentUploadDescriptor,
+  storedObject: DocumentStoredObject | null,
+  expectedObjectKey: string,
+): asserts storedObject is DocumentStoredObject {
+  if (!storedObject) throw new Error('Document object is not available in durable storage')
+  if (storedObject.objectKey !== expectedObjectKey) throw new Error('Stored document object key does not match the trusted namespace')
+  if (storedObject.mediaType !== descriptor.mediaType) throw new Error('Stored document content type does not match intake metadata')
+  if (storedObject.sizeBytes !== descriptor.sizeBytes) throw new Error('Stored document content length does not match intake metadata')
+  if (storedObject.checksumSha256 !== descriptor.checksumSha256) throw new Error('Stored document SHA-256 does not match intake metadata')
 }
