@@ -8,6 +8,9 @@ export type Permission =
   | 'workflow:read'
   | 'workflow:create'
   | 'workflow:manage'
+  | 'document:read'
+  | 'document:create'
+  | 'document:manage'
 
 export type ApiErrorCode =
   | 'VALIDATION_ERROR'
