@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Pool } from 'pg'
-import { InvalidDocumentCursorError, PostgresDocumentRepository } from '../src/documents/repository.js'
+import { DuplicateDocumentError, InvalidDocumentCursorError, PostgresDocumentRepository } from '../src/documents/repository.js'
 
 interface RecordedQuery {
   text: string
@@ -19,6 +19,13 @@ function fakePool(rows: Record<string, unknown>[] = []) {
   } as unknown as Pool
 
   return { pool, queries }
+}
+
+function failingPool(error: Error & { code?: string; constraint?: string }): Pool {
+  return {
+    async query() { throw error },
+    async end() {},
+  } as unknown as Pool
 }
 
 const organizationId = '11111111-1111-4111-8111-111111111111'
@@ -57,6 +64,39 @@ test('create derives tenant scope from the server argument', async () => {
   assert.match(queries[0].text, /INSERT INTO documents/)
   assert.equal(queries[0].values[0], organizationId)
   assert.equal(result.organizationId, organizationId)
+})
+
+test('create classifies tenant checksum conflicts without leaking database errors', async () => {
+  const databaseError = Object.assign(new Error('duplicate key value'), {
+    code: '23505',
+    constraint: 'documents_org_checksum_uq',
+  })
+
+  await assert.rejects(
+    () => new PostgresDocumentRepository(failingPool(databaseError)).create(organizationId, createInput),
+    (error: unknown) => error instanceof DuplicateDocumentError && error.reason === 'checksum',
+  )
+})
+
+test('create classifies source external-reference conflicts for idempotent intake handling', async () => {
+  const databaseError = Object.assign(new Error('duplicate key value'), {
+    code: '23505',
+    constraint: 'documents_org_source_external_reference_uq',
+  })
+
+  await assert.rejects(
+    () => new PostgresDocumentRepository(failingPool(databaseError)).create(organizationId, { ...createInput, source: 'integration', externalReference: 'erp-42' }),
+    (error: unknown) => error instanceof DuplicateDocumentError && error.reason === 'external_reference',
+  )
+})
+
+test('create does not hide unrelated database failures', async () => {
+  const databaseError = Object.assign(new Error('foreign key violation'), { code: '23503', constraint: 'documents_branch_tenant_fk' })
+
+  await assert.rejects(
+    () => new PostgresDocumentRepository(failingPool(databaseError)).create(organizationId, createInput),
+    (error: unknown) => error === databaseError,
+  )
 })
 
 test('getById requires both organization and document identity', async () => {
