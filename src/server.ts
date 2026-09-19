@@ -1,5 +1,7 @@
 import { Pool } from 'pg'
 import { app } from './app.js'
+import { AuditService } from './audit/service.js'
+import { auditRoutes } from './audit/routes.js'
 import { createAuthRepository } from './auth/repository.js'
 import { PostgresOrganizationRepository } from './organization/repository.js'
 import { organizationRoutes } from './organization/routes.js'
@@ -28,10 +30,25 @@ await app.register(organizationRoutes, {
   organizationRepository,
 })
 
+// Audit reads use an independent repository/service composition. The route
+// derives organization scope from the authenticated session and never accepts
+// a client-controlled tenant or organization identifier.
+const auditAuthRepository = createAuthRepository(databaseUrl())
+const auditService = new AuditService(
+  new Pool({ connectionString: databaseUrl(), max: 5 }),
+)
+
+await app.register(auditRoutes, {
+  authRepository: auditAuthRepository,
+  auditService,
+})
+
 app.addHook('onClose', async () => {
   await Promise.all([
     organizationAuthRepository.close?.(),
     organizationRepository.close(),
+    auditAuthRepository.close?.(),
+    auditService.close(),
   ])
 })
 
