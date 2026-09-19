@@ -48,13 +48,14 @@ describe('DocumentObjectStorage lifecycle contract', () => {
   it('requires upload targets to expire and bind immutable integrity metadata', async () => {
     const issuedTarget = target()
     const storage: DocumentObjectStorage = {
-      async createUploadTarget(received) {
+      async createUploadTarget(received, objectKey) {
         expect(received).toEqual(descriptor)
+        expect(objectKey).toBe(expectedObjectKey)
         return issuedTarget
       },
     }
 
-    const issued = await storage.createUploadTarget(descriptor)
+    const issued = await storage.createUploadTarget(descriptor, expectedObjectKey)
     expect(() => assertUploadTarget(descriptor, issued, expectedObjectKey, nowMs)).not.toThrow()
   })
 
