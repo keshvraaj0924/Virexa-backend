@@ -3,6 +3,8 @@ import { app } from './app.js'
 import { AuditService } from './audit/service.js'
 import { auditRoutes } from './audit/routes.js'
 import { createAuthRepository } from './auth/repository.js'
+import { PostgresDocumentRepository } from './documents/repository.js'
+import { registerDocumentRoutes } from './documents/routes.js'
 import { PostgresOrganizationRepository } from './organization/repository.js'
 import { organizationRoutes } from './organization/routes.js'
 
@@ -43,12 +45,32 @@ await app.register(auditRoutes, {
   auditService,
 })
 
+// Documents use explicit composition as well. Every document route derives
+// organization scope from the authenticated session before repository access;
+// callers cannot select a tenant in request bodies, path params, or queries.
+const documentAuthRepository = createAuthRepository(databaseUrl())
+const documentAuditService = new AuditService(
+  new Pool({ connectionString: databaseUrl(), max: 5 }),
+)
+const documentRepository = new PostgresDocumentRepository(
+  new Pool({ connectionString: databaseUrl(), max: 10 }),
+)
+
+await registerDocumentRoutes(app, {
+  authRepository: documentAuthRepository,
+  auditService: documentAuditService,
+  documentRepository,
+})
+
 app.addHook('onClose', async () => {
   await Promise.all([
     organizationAuthRepository.close?.(),
     organizationRepository.close(),
     auditAuthRepository.close?.(),
     auditService.close(),
+    documentAuthRepository.close?.(),
+    documentAuditService.close(),
+    documentRepository.close(),
   ])
 })
 
