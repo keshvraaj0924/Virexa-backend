@@ -26,6 +26,9 @@ export type ApiErrorCode =
   | 'WORKFLOW_CONFLICT'
   | 'IDEMPOTENCY_KEY_REUSED'
   | 'RATE_LIMITED'
+  | 'INVALID_CURSOR'
+  | 'DOCUMENT_CHECKSUM_CONFLICT'
+  | 'DOCUMENT_EXTERNAL_REFERENCE_CONFLICT'
 
 export interface UserSummary {
   id: string
