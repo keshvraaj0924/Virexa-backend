@@ -9,12 +9,10 @@ export const documentStatuses = [
 ] as const;
 
 export const documentStatusSchema = z.enum(documentStatuses);
-
 export const documentSourceSchema = z.enum(["upload", "email", "api", "integration"]);
 
 export const documentSchema = z.object({
   id: z.string().uuid(),
-  tenantId: z.string().uuid(),
   organizationId: z.string().uuid(),
   branchId: z.string().uuid().nullable(),
   departmentId: z.string().uuid().nullable(),
@@ -22,7 +20,7 @@ export const documentSchema = z.object({
   externalReference: z.string().max(255).nullable(),
   originalFileName: z.string().min(1).max(512),
   mediaType: z.string().min(1).max(255),
-  sizeBytes: z.number().int().nonnegative(),
+  sizeBytes: z.number().int().positive(),
   checksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
   status: documentStatusSchema,
   failureCode: z.string().max(100).nullable(),
@@ -30,8 +28,8 @@ export const documentSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+// Tenant scope is server-authoritative. Callers can never select organizationId.
 export const createDocumentRequestSchema = z.object({
-  organizationId: z.string().uuid(),
   branchId: z.string().uuid().optional(),
   departmentId: z.string().uuid().optional(),
   source: documentSourceSchema.default("upload"),
@@ -40,14 +38,13 @@ export const createDocumentRequestSchema = z.object({
   mediaType: z.string().trim().min(1).max(255),
   sizeBytes: z.number().int().positive(),
   checksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
-});
+}).strict();
 
 export const documentListQuerySchema = z.object({
   status: documentStatusSchema.optional(),
-  organizationId: z.string().uuid().optional(),
   cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
-});
+}).strict();
 
 export const documentListResponseSchema = z.object({
   items: z.array(documentSchema),
