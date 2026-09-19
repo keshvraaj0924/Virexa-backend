@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { assertUploadTarget, type DocumentObjectStorage, type DocumentUploadDescriptor, type DocumentUploadTarget } from './storage.js'
+import {
+  assertStoredObject,
+  assertUploadTarget,
+  type DocumentObjectStorage,
+  type DocumentStoredObject,
+  type DocumentUploadDescriptor,
+  type DocumentUploadTarget,
+} from './storage.js'
 
 const descriptor: DocumentUploadDescriptor = {
   organizationId: '11111111-1111-4111-8111-111111111111',
@@ -23,6 +30,16 @@ function target(overrides: Partial<DocumentUploadTarget> = {}): DocumentUploadTa
       'content-length': String(descriptor.sizeBytes),
       'x-virexa-sha256': descriptor.checksumSha256,
     },
+    ...overrides,
+  }
+}
+
+function storedObject(overrides: Partial<DocumentStoredObject> = {}): DocumentStoredObject {
+  return {
+    objectKey: expectedObjectKey,
+    mediaType: descriptor.mediaType,
+    sizeBytes: descriptor.sizeBytes,
+    checksumSha256: descriptor.checksumSha256,
     ...overrides,
   }
 }
@@ -55,5 +72,20 @@ describe('DocumentObjectStorage lifecycle contract', () => {
   it('rejects upload targets that weaken immutable integrity bindings', () => {
     expect(() => assertUploadTarget(descriptor, target({ requiredHeaders: { ...target().requiredHeaders, 'content-length': '2048' } }), expectedObjectKey, nowMs)).toThrow(/content length/)
     expect(() => assertUploadTarget(descriptor, target({ requiredHeaders: { ...target().requiredHeaders, 'x-virexa-sha256': 'b'.repeat(64) } }), expectedObjectKey, nowMs)).toThrow(/SHA-256/)
+  })
+
+  it('accepts completion only from provider-observed immutable object metadata', () => {
+    expect(() => assertStoredObject(descriptor, storedObject(), expectedObjectKey)).not.toThrow()
+  })
+
+  it('fails completion closed when the object is absent or outside the trusted namespace', () => {
+    expect(() => assertStoredObject(descriptor, null, expectedObjectKey)).toThrow(/not available/)
+    expect(() => assertStoredObject(descriptor, storedObject({ objectKey: 'documents/other-tenant/document/object' }), expectedObjectKey)).toThrow(/trusted namespace/)
+  })
+
+  it('rejects completion when provider-observed integrity metadata differs from intake', () => {
+    expect(() => assertStoredObject(descriptor, storedObject({ mediaType: 'application/octet-stream' }), expectedObjectKey)).toThrow(/content type/)
+    expect(() => assertStoredObject(descriptor, storedObject({ sizeBytes: 2048 }), expectedObjectKey)).toThrow(/content length/)
+    expect(() => assertStoredObject(descriptor, storedObject({ checksumSha256: 'b'.repeat(64) }), expectedObjectKey)).toThrow(/SHA-256/)
   })
 })
