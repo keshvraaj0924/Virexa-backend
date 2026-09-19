@@ -25,6 +25,8 @@ export interface DocumentObjectStorage {
   createUploadTarget(descriptor: DocumentUploadDescriptor): Promise<DocumentUploadTarget>
 }
 
+const MAX_UPLOAD_TARGET_TTL_MS = 15 * 60 * 1000
+
 /**
  * Generates an opaque object key under the server-authoritative organization
  * and document namespaces. The original filename is deliberately excluded so
@@ -44,4 +46,37 @@ export function assertUploadDescriptor(descriptor: DocumentUploadDescriptor): vo
   }
   if (!descriptor.mediaType.trim()) throw new Error('Document media type is required')
   if (!descriptor.originalFileName.trim()) throw new Error('Document filename is required')
+}
+
+/**
+ * Validates provider output before an upload target is returned to a caller.
+ * The API layer must provide the expected object key generated from trusted
+ * organization/document identity; provider output cannot redirect a tenant to
+ * a different object namespace or relax immutable integrity metadata.
+ */
+export function assertUploadTarget(
+  descriptor: DocumentUploadDescriptor,
+  target: DocumentUploadTarget,
+  expectedObjectKey: string,
+  nowMs = Date.now(),
+): void {
+  if (target.objectKey !== expectedObjectKey) throw new Error('Document upload target object key does not match the trusted namespace')
+
+  let uploadUrl: URL
+  try {
+    uploadUrl = new URL(target.uploadUrl)
+  } catch {
+    throw new Error('Document upload target URL is invalid')
+  }
+  if (uploadUrl.protocol !== 'https:') throw new Error('Document upload target URL must use HTTPS')
+
+  const expiresAtMs = Date.parse(target.expiresAt)
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs || expiresAtMs > nowMs + MAX_UPLOAD_TARGET_TTL_MS) {
+    throw new Error('Document upload target expiry is invalid')
+  }
+
+  const headers = Object.fromEntries(Object.entries(target.requiredHeaders).map(([name, value]) => [name.toLowerCase(), value]))
+  if (headers['content-type'] !== descriptor.mediaType) throw new Error('Document upload target must bind content type')
+  if (headers['content-length'] !== String(descriptor.sizeBytes)) throw new Error('Document upload target must bind content length')
+  if (headers['x-virexa-sha256'] !== descriptor.checksumSha256) throw new Error('Document upload target must bind SHA-256 integrity metadata')
 }
