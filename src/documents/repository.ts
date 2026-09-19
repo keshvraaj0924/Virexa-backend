@@ -23,6 +23,36 @@ type DocumentCursor = {
   id: string
 }
 
+type PostgresError = Error & {
+  code?: string
+  constraint?: string
+}
+
+export type DuplicateDocumentReason = 'checksum' | 'external_reference'
+
+export class DuplicateDocumentError extends Error {
+  constructor(readonly reason: DuplicateDocumentReason) {
+    super(reason === 'checksum'
+      ? 'A document with this checksum already exists in the organization.'
+      : 'A document with this source and external reference already exists in the organization.')
+    this.name = 'DUPLICATE_DOCUMENT'
+  }
+}
+
+const duplicateConstraintReasons: Readonly<Record<string, DuplicateDocumentReason>> = {
+  documents_org_checksum_uq: 'checksum',
+  documents_org_source_external_reference_uq: 'external_reference',
+}
+
+function mapCreateError(error: unknown): never {
+  const databaseError = error as PostgresError
+  if (databaseError?.code === '23505' && databaseError.constraint) {
+    const reason = duplicateConstraintReasons[databaseError.constraint]
+    if (reason) throw new DuplicateDocumentError(reason)
+  }
+  throw error
+}
+
 const columns = `
   id, organization_id, branch_id, department_id, source, external_reference,
   original_file_name, media_type, size_bytes, checksum_sha256, status,
@@ -74,25 +104,29 @@ export class PostgresDocumentRepository implements DocumentRepository {
   constructor(private readonly pool: Pool) {}
 
   async create(organizationId: string, input: CreateDocumentRequest): Promise<DocumentRecord> {
-    const result = await this.pool.query(
-      `INSERT INTO documents (
-        organization_id, branch_id, department_id, source, external_reference,
-        original_file_name, media_type, size_bytes, checksum_sha256
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING ${columns}`,
-      [
-        organizationId,
-        input.branchId ?? null,
-        input.departmentId ?? null,
-        input.source,
-        input.externalReference ?? null,
-        input.originalFileName.trim(),
-        input.mediaType.trim(),
-        input.sizeBytes,
-        input.checksumSha256,
-      ],
-    )
-    return mapDocument(result.rows[0])
+    try {
+      const result = await this.pool.query(
+        `INSERT INTO documents (
+          organization_id, branch_id, department_id, source, external_reference,
+          original_file_name, media_type, size_bytes, checksum_sha256
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING ${columns}`,
+        [
+          organizationId,
+          input.branchId ?? null,
+          input.departmentId ?? null,
+          input.source,
+          input.externalReference ?? null,
+          input.originalFileName.trim(),
+          input.mediaType.trim(),
+          input.sizeBytes,
+          input.checksumSha256,
+        ],
+      )
+      return mapDocument(result.rows[0])
+    } catch (error) {
+      mapCreateError(error)
+    }
   }
 
   async list(organizationId: string, query: DocumentListQuery): Promise<DocumentListResult> {
