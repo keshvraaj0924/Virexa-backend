@@ -51,6 +51,8 @@ export const documentListResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export type DocumentStatus = z.infer<typeof documentStatusSchema>;
+export type DocumentSource = z.infer<typeof documentSourceSchema>;
 export type DocumentRecord = z.infer<typeof documentSchema>;
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
 export type DocumentListQuery = z.infer<typeof documentListQuerySchema>;
