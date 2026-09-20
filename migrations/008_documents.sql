@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS documents (
   CONSTRAINT documents_media_type_check CHECK (length(btrim(media_type)) BETWEEN 1 AND 255),
   CONSTRAINT documents_external_reference_check CHECK (external_reference IS NULL OR length(external_reference) BETWEEN 1 AND 255),
   CONSTRAINT documents_failure_code_check CHECK (failure_code IS NULL OR length(failure_code) <= 100),
+  CONSTRAINT documents_org_id_uq UNIQUE (organization_id, id),
   CONSTRAINT documents_branch_tenant_fk
     FOREIGN KEY (organization_id, branch_id)
     REFERENCES branches (organization_id, id)
