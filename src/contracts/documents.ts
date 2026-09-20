@@ -56,32 +56,37 @@ export const documentListResponseSchema = z.object({
 export const documentUploadIdempotencyKeySchema = z.string().trim().min(1).max(255);
 export const documentUploadAttemptStatusSchema = z.enum(["initiated", "completed", "failed"]);
 
+// This is the public projection of a persisted upload attempt. It intentionally
+// excludes organizationId, idempotencyKey, and objectKey so callers cannot use
+// storage internals or tenant identifiers as authority. The timestamps mirror
+// the durable repository exactly: completedAt is terminal-success time while
+// updatedAt also represents failure/state-transition time.
 export const documentUploadAttemptSchema = z.object({
   id: z.string().uuid(),
   documentId: z.string().uuid(),
   status: documentUploadAttemptStatusSchema,
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().nullable(),
-  failedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime(),
   failureCode: z.string().max(100).nullable(),
-});
+}).strict();
 
 export const documentUploadTargetSchema = z.object({
   uploadUrl: z.string().url().refine((value) => value.startsWith("https://"), "Upload URL must use HTTPS"),
   expiresAt: z.string().datetime(),
   requiredHeaders: z.record(z.string(), z.string()),
-});
+}).strict();
 
 export const initiateDocumentUploadResponseSchema = z.object({
   attempt: documentUploadAttemptSchema,
   target: documentUploadTargetSchema,
   replayed: z.boolean(),
-});
+}).strict();
 
 export const completeDocumentUploadResponseSchema = z.object({
   attempt: documentUploadAttemptSchema,
   replayed: z.boolean(),
-});
+}).strict();
 
 export type DocumentStatus = z.infer<typeof documentStatusSchema>;
 export type DocumentSource = z.infer<typeof documentSourceSchema>;
