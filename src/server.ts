@@ -5,6 +5,10 @@ import { auditRoutes } from './audit/routes.js'
 import { createAuthRepository } from './auth/repository.js'
 import { PostgresDocumentRepository } from './documents/repository.js'
 import { registerDocumentRoutes } from './documents/routes.js'
+import { S3DocumentObjectStorage } from './documents/s3-storage.js'
+import { documentStorageConfigFromEnv } from './documents/storage-config.js'
+import { PostgresDocumentUploadAttemptRepository } from './documents/upload-attempt-repository.js'
+import { DocumentUploadService } from './documents/upload-service.js'
 import { PostgresOrganizationRepository } from './organization/repository.js'
 import { organizationRoutes } from './organization/routes.js'
 
@@ -56,10 +60,25 @@ const documentRepository = new PostgresDocumentRepository(
   new Pool({ connectionString: databaseUrl(), max: 10 }),
 )
 
+// Binary upload is a capability, not a startup requirement. When S3 storage is
+// absent, metadata/list APIs remain independently deployable and upload routes
+// return an explicit 503 rather than falling back to local disk or mock data.
+const documentStorageConfig = documentStorageConfigFromEnv()
+const documentUploadAttemptRepository = documentStorageConfig
+  ? new PostgresDocumentUploadAttemptRepository(new Pool({ connectionString: databaseUrl(), max: 5 }))
+  : null
+const documentUploadService = documentStorageConfig && documentUploadAttemptRepository
+  ? new DocumentUploadService(
+      new S3DocumentObjectStorage(documentStorageConfig),
+      documentUploadAttemptRepository,
+    )
+  : undefined
+
 await registerDocumentRoutes(app, {
   authRepository: documentAuthRepository,
   auditService: documentAuditService,
   documentRepository,
+  uploadService: documentUploadService,
 })
 
 app.addHook('onClose', async () => {
@@ -71,6 +90,7 @@ app.addHook('onClose', async () => {
     documentAuthRepository.close?.(),
     documentAuditService.close(),
     documentRepository.close(),
+    documentUploadAttemptRepository?.close(),
   ])
 })
 
