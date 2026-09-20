@@ -68,6 +68,27 @@ test('getById cannot resolve an attempt without the server organization scope', 
   assert.deepEqual(queries[0].values, [otherOrganizationId, attemptId])
 })
 
+test('getByIdempotencyKey is tenant-scoped and normalizes the replay key', async () => {
+  const { pool, queries } = poolForQueries([[]])
+  const repository = new PostgresDocumentUploadAttemptRepository(pool)
+
+  assert.equal(await repository.getByIdempotencyKey(otherOrganizationId, ' upload-1 '), null)
+  assert.match(queries[0].text, /WHERE organization_id = \$1 AND idempotency_key = \$2/)
+  assert.deepEqual(queries[0].values, [otherOrganizationId, 'upload-1'])
+})
+
+test('getByIdempotencyKey returns the original trusted object binding for a replay', async () => {
+  const row = attemptRow()
+  const { pool } = poolForQueries([[row]])
+  const repository = new PostgresDocumentUploadAttemptRepository(pool)
+
+  const result = await repository.getByIdempotencyKey(organizationId, 'upload-1')
+
+  assert.equal(result?.documentId, documentId)
+  assert.equal(result?.objectKey, row.object_key)
+  assert.equal(result?.status, 'initiated')
+})
+
 test('createOrGet replays the same tenant-bound request after an idempotency collision', async () => {
   const row = attemptRow()
   const { pool, queries } = transactionalPool([[], [row]])
