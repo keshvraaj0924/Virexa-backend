@@ -23,6 +23,12 @@ export interface PersistedDocumentUpload extends InitiatedDocumentUpload {
   replayed: boolean
 }
 
+export interface CompletedDocumentUpload {
+  attempt: DocumentUploadAttempt
+  storedObject: DocumentStoredObject
+  replayed: boolean
+}
+
 /** Coordinates the provider-neutral binary upload boundary. */
 export class DocumentUploadService {
   constructor(
@@ -73,6 +79,47 @@ export class DocumentUploadService {
     // A concurrent request may have won the idempotency race. Always trust the persisted key.
     const target = await this.createTarget(descriptor, attempt.objectKey, nowMs)
     return { attempt, objectKey: attempt.objectKey, target, replayed: attempt.objectKey !== objectKey }
+  }
+
+  /**
+   * Completes a persisted attempt using server-authoritative tenant/document binding.
+   * Integrity is verified against provider-observed durable metadata before the compare-and-set
+   * transition. Failed integrity checks are persisted as terminal failures after cleanup is attempted.
+   */
+  async completePersisted(
+    descriptor: DocumentUploadDescriptor,
+    attemptId: string,
+  ): Promise<CompletedDocumentUpload> {
+    assertUploadDescriptor(descriptor)
+    const attempts = this.requireAttempts()
+    const attempt = await attempts.getById(descriptor.organizationId, attemptId)
+    if (!attempt || attempt.documentId !== descriptor.documentId) {
+      throw new Error('Document upload attempt was not found for this document.')
+    }
+    if (attempt.status === 'failed') {
+      throw new Error('Document upload attempt has already failed.')
+    }
+
+    // A completed retry is still checked against durable provider state; database state alone
+    // never proves that the object still satisfies the upload contract.
+    if (attempt.status === 'completed') {
+      const storedObject = await this.verifyCompletion(descriptor, attempt.objectKey)
+      return { attempt, storedObject, replayed: true }
+    }
+
+    let storedObject: DocumentStoredObject
+    try {
+      storedObject = await this.verifyCompletion(descriptor, attempt.objectKey)
+    } catch (error) {
+      await attempts.fail(descriptor.organizationId, attempt.id, 'object_integrity_verification_failed')
+      throw error
+    }
+
+    const completed = await attempts.complete(descriptor.organizationId, attempt.id)
+    if (!completed || completed.status !== 'completed') {
+      throw new Error('Document upload attempt could not be completed because its state changed concurrently.')
+    }
+    return { attempt: completed, storedObject, replayed: false }
   }
 
   async verifyCompletion(descriptor: DocumentUploadDescriptor, objectKey: string): Promise<DocumentStoredObject> {
