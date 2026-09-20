@@ -24,6 +24,7 @@ export interface CreateDocumentUploadAttempt {
 export interface DocumentUploadAttemptRepository {
   createOrGet(organizationId: string, input: CreateDocumentUploadAttempt): Promise<DocumentUploadAttempt>
   getById(organizationId: string, attemptId: string): Promise<DocumentUploadAttempt | null>
+  getByIdempotencyKey(organizationId: string, idempotencyKey: string): Promise<DocumentUploadAttempt | null>
   complete(organizationId: string, attemptId: string): Promise<DocumentUploadAttempt | null>
   fail(organizationId: string, attemptId: string, failureCode: string): Promise<DocumentUploadAttempt | null>
   close?(): Promise<void>
@@ -105,6 +106,16 @@ export class PostgresDocumentUploadAttemptRepository implements DocumentUploadAt
        FROM document_upload_attempts
        WHERE organization_id = $1 AND id = $2`,
       [organizationId, attemptId],
+    )
+    return result.rows[0] ? mapAttempt(result.rows[0]) : null
+  }
+
+  async getByIdempotencyKey(organizationId: string, idempotencyKey: string): Promise<DocumentUploadAttempt | null> {
+    const result = await this.pool.query(
+      `SELECT ${columns}
+       FROM document_upload_attempts
+       WHERE organization_id = $1 AND idempotency_key = $2`,
+      [organizationId, idempotencyKey.trim()],
     )
     return result.rows[0] ? mapAttempt(result.rows[0]) : null
   }
