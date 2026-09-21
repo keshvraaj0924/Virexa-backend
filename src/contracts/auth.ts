@@ -8,6 +8,9 @@ export type Permission =
   | 'workflow:read'
   | 'workflow:create'
   | 'workflow:manage'
+  | 'document:read'
+  | 'document:create'
+  | 'document:manage'
 
 export type ApiErrorCode =
   | 'VALIDATION_ERROR'
@@ -23,6 +26,12 @@ export type ApiErrorCode =
   | 'WORKFLOW_CONFLICT'
   | 'IDEMPOTENCY_KEY_REUSED'
   | 'RATE_LIMITED'
+  | 'INVALID_CURSOR'
+  | 'DOCUMENT_CHECKSUM_CONFLICT'
+  | 'DOCUMENT_EXTERNAL_REFERENCE_CONFLICT'
+  | 'DOCUMENT_STORAGE_UNAVAILABLE'
+  | 'DOCUMENT_UPLOAD_CONFLICT'
+  | 'DOCUMENT_UPLOAD_NOT_FOUND'
 
 export interface UserSummary {
   id: string
