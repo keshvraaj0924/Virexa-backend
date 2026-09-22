@@ -58,6 +58,7 @@ test('review compare-and-swap is tenant scoped and only patches field values', a
   assert.match(queries[0].text, /id = \$3/)
   assert.match(queries[0].text, /updated_at = \$4::timestamptz/)
   assert.match(queries[0].text, /jsonb_set\(original\.value, '\{value\}'/)
+  assert.match(queries[0].text, /NOT EXISTS/)
   assert.deepEqual(queries[0].values.slice(0, 4), [organizationId, documentId, extractionId, expectedUpdatedAt])
   assert.equal(queries[0].values[4], JSON.stringify(reviewInput.fields))
   assert.equal(result.fields[0].confidence, 0.91)
@@ -78,8 +79,22 @@ test('review returns not found when extraction is not visible in the authenticat
   assert.match(queries[1].text, /WHERE organization_id = \$1 AND document_id = \$2 AND id = \$3/)
 })
 
+test('review rejects keys that are not present in the authoritative extraction fields', async () => {
+  const unknownFieldInput = { ...reviewInput, fields: [{ key: 'caller_injected_field', value: 'bad' }] }
+  const { pool, queries } = sequentialPool([[], [{ updated_at: new Date(expectedUpdatedAt), fields: extractionRow().fields }]])
+  const repository = new DocumentExtractionRepository(pool)
+
+  await assert.rejects(
+    () => repository.review(unknownFieldInput),
+    (error: unknown) => error instanceof Error && error.message === 'EXTRACTION_REVIEW_FIELD_NOT_FOUND',
+  )
+
+  assert.equal(queries.length, 2)
+  assert.match(queries[0].text, /NOT EXISTS/)
+})
+
 test('review reports an optimistic concurrency conflict without retrying a stale mutation', async () => {
-  const { pool, queries } = sequentialPool([[], [{ updated_at: new Date('2026-09-22T00:02:00.000Z') }]])
+  const { pool, queries } = sequentialPool([[], [{ updated_at: new Date('2026-09-22T00:02:00.000Z'), fields: extractionRow().fields }]])
   const repository = new DocumentExtractionRepository(pool)
 
   await assert.rejects(
