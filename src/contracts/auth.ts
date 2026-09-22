@@ -32,6 +32,8 @@ export type ApiErrorCode =
   | 'DOCUMENT_STORAGE_UNAVAILABLE'
   | 'DOCUMENT_UPLOAD_CONFLICT'
   | 'DOCUMENT_UPLOAD_NOT_FOUND'
+  | 'EXTRACTION_REVIEW_FIELD_NOT_FOUND'
+  | 'EXTRACTION_REVIEW_CONFLICT'
 
 export interface UserSummary {
   id: string

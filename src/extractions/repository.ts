@@ -5,6 +5,7 @@ import type {
   DocumentExtractionListQuery,
   ExtractionField,
   ExtractionStatus,
+  ReviewDocumentExtractionRequest,
 } from "../contracts/extractions.js";
 
 export interface CreateExtractionInput {
@@ -17,6 +18,12 @@ export interface CreateExtractionInput {
 export interface ListExtractionsInput extends DocumentExtractionListQuery {
   organizationId: string;
   documentId: string;
+}
+
+export interface ReviewExtractionInput extends ReviewDocumentExtractionRequest {
+  organizationId: string;
+  documentId: string;
+  extractionId: string;
 }
 
 interface ExtractionRow {
@@ -105,6 +112,62 @@ export class DocumentExtractionRepository {
       [input.organizationId, input.documentId, input.idempotencyKey],
     );
     return result.rows[0] ? mapExtraction(result.rows[0]) : null;
+  }
+
+  async review(input: ReviewExtractionInput): Promise<DocumentExtraction> {
+    const result = await this.pool.query<ExtractionRow>(
+      `UPDATE document_extractions
+       SET fields = (
+         SELECT jsonb_agg(
+           CASE
+             WHEN patch.value IS NULL THEN original.value
+             ELSE jsonb_set(original.value, '{value}', patch.value->'value', true)
+           END
+           ORDER BY original.ordinality
+         )
+         FROM jsonb_array_elements(fields) WITH ORDINALITY AS original(value, ordinality)
+         LEFT JOIN jsonb_array_elements($5::jsonb) AS patch(value)
+           ON patch.value->>'key' = original.value->>'key'
+       ),
+       updated_at = now()
+       WHERE organization_id = $1
+         AND document_id = $2
+         AND id = $3
+         AND updated_at = $4::timestamptz
+         AND NOT EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements($5::jsonb) AS requested(value)
+           WHERE NOT EXISTS (
+             SELECT 1
+             FROM jsonb_array_elements(fields) AS original(value)
+             WHERE original.value->>'key' = requested.value->>'key'
+           )
+         )
+       RETURNING id, document_id, status, schema_version, fields, failure_code,
+                 created_at, updated_at, completed_at`,
+      [
+        input.organizationId,
+        input.documentId,
+        input.extractionId,
+        input.expectedUpdatedAt,
+        JSON.stringify(input.fields),
+      ],
+    );
+    if (result.rows[0]) return mapExtraction(result.rows[0]);
+
+    const visible = await this.pool.query<{ updated_at: Date; fields: ExtractionField[] }>(
+      `SELECT updated_at, fields
+       FROM document_extractions
+       WHERE organization_id = $1 AND document_id = $2 AND id = $3`,
+      [input.organizationId, input.documentId, input.extractionId],
+    );
+    if (!visible.rows[0]) throw new Error("EXTRACTION_NOT_FOUND");
+
+    const existingKeys = new Set(visible.rows[0].fields.map((field) => field.key));
+    if (input.fields.some((field) => !existingKeys.has(field.key))) {
+      throw new Error("EXTRACTION_REVIEW_FIELD_NOT_FOUND");
+    }
+    throw new Error("EXTRACTION_REVIEW_CONFLICT");
   }
 
   async list(input: ListExtractionsInput): Promise<{ items: DocumentExtraction[]; nextCursor: string | null }> {
