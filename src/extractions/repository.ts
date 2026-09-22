@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type {
+  CompleteDocumentExtractionRequest,
   DocumentExtraction,
   DocumentExtractionListQuery,
   ExtractionField,
@@ -21,6 +22,12 @@ export interface ListExtractionsInput extends DocumentExtractionListQuery {
 }
 
 export interface ReviewExtractionInput extends ReviewDocumentExtractionRequest {
+  organizationId: string;
+  documentId: string;
+  extractionId: string;
+}
+
+export interface CompleteExtractionInput extends CompleteDocumentExtractionRequest {
   organizationId: string;
   documentId: string;
   extractionId: string;
@@ -168,6 +175,32 @@ export class DocumentExtractionRepository {
       throw new Error("EXTRACTION_REVIEW_FIELD_NOT_FOUND");
     }
     throw new Error("EXTRACTION_REVIEW_CONFLICT");
+  }
+
+  async complete(input: CompleteExtractionInput): Promise<DocumentExtraction> {
+    const result = await this.pool.query<ExtractionRow>(
+      `UPDATE document_extractions
+       SET status = 'completed', completed_at = now(), updated_at = now()
+       WHERE organization_id = $1
+         AND document_id = $2
+         AND id = $3
+         AND updated_at = $4::timestamptz
+         AND status = 'review_required'
+       RETURNING id, document_id, status, schema_version, fields, failure_code,
+                 created_at, updated_at, completed_at`,
+      [input.organizationId, input.documentId, input.extractionId, input.expectedUpdatedAt],
+    );
+    if (result.rows[0]) return mapExtraction(result.rows[0]);
+
+    const visible = await this.pool.query<{ status: ExtractionStatus; updated_at: Date }>(
+      `SELECT status, updated_at
+       FROM document_extractions
+       WHERE organization_id = $1 AND document_id = $2 AND id = $3`,
+      [input.organizationId, input.documentId, input.extractionId],
+    );
+    if (!visible.rows[0]) throw new Error("EXTRACTION_NOT_FOUND");
+    if (visible.rows[0].status !== 'review_required') throw new Error("EXTRACTION_COMPLETION_INVALID_STATE");
+    throw new Error("EXTRACTION_COMPLETION_CONFLICT");
   }
 
   async list(input: ListExtractionsInput): Promise<{ items: DocumentExtraction[]; nextCursor: string | null }> {

@@ -83,6 +83,14 @@ export const reviewDocumentExtractionRequestSchema = z.object({
   }
 });
 
+// POST /api/v1/documents/:documentId/extractions/:extractionId/complete
+// Completion is a lifecycle transition, not a second review payload. The
+// caller supplies only the last authoritative updatedAt token; tenant scope,
+// current lifecycle state, fields, provider and model remain server-owned.
+export const completeDocumentExtractionRequestSchema = z.object({
+  expectedUpdatedAt: z.string().datetime(),
+}).strict();
+
 export const extractionIdempotencyKeySchema = z.string().trim().min(1).max(255);
 
 export type ExtractionStatus = z.infer<typeof extractionStatusSchema>;
@@ -90,5 +98,6 @@ export type ExtractionField = z.infer<typeof extractionFieldSchema>;
 export type DocumentExtraction = z.infer<typeof documentExtractionSchema>;
 export type CreateDocumentExtractionRequest = z.infer<typeof createDocumentExtractionRequestSchema>;
 export type ReviewDocumentExtractionRequest = z.infer<typeof reviewDocumentExtractionRequestSchema>;
+export type CompleteDocumentExtractionRequest = z.infer<typeof completeDocumentExtractionRequestSchema>;
 export type DocumentExtractionListQuery = z.infer<typeof documentExtractionListQuerySchema>;
 export type DocumentExtractionListResponse = z.infer<typeof documentExtractionListResponseSchema>;
