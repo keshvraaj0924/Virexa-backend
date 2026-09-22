@@ -9,6 +9,8 @@ import { S3DocumentObjectStorage } from './documents/s3-storage.js'
 import { documentStorageConfigFromEnv } from './documents/storage-config.js'
 import { PostgresDocumentUploadAttemptRepository } from './documents/upload-attempt-repository.js'
 import { DocumentUploadService } from './documents/upload-service.js'
+import { DocumentExtractionRepository } from './extractions/repository.js'
+import { registerExtractionRoutes } from './extractions/routes.js'
 import { PostgresOrganizationRepository } from './organization/repository.js'
 import { organizationRoutes } from './organization/routes.js'
 
@@ -81,6 +83,22 @@ await registerDocumentRoutes(app, {
   uploadService: documentUploadService,
 })
 
+// Extraction routes are composed only from durable backend capabilities. The
+// authenticated session remains the tenant authority; the public API cannot
+// choose organization, provider, or model scope.
+const extractionAuthRepository = createAuthRepository(databaseUrl())
+const extractionAuditService = new AuditService(
+  new Pool({ connectionString: databaseUrl(), max: 5 }),
+)
+const extractionPool = new Pool({ connectionString: databaseUrl(), max: 10 })
+const extractionRepository = new DocumentExtractionRepository(extractionPool)
+
+await registerExtractionRoutes(app, {
+  authRepository: extractionAuthRepository,
+  auditService: extractionAuditService,
+  extractionRepository,
+})
+
 app.addHook('onClose', async () => {
   await Promise.all([
     organizationAuthRepository.close?.(),
@@ -91,6 +109,9 @@ app.addHook('onClose', async () => {
     documentAuditService.close(),
     documentRepository.close(),
     documentUploadAttemptRepository?.close(),
+    extractionAuthRepository.close?.(),
+    extractionAuditService.close(),
+    extractionPool.end(),
   ])
 })
 
