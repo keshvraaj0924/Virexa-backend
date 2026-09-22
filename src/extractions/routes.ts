@@ -6,10 +6,12 @@ import { assertTrustedOrigin } from '../auth/origin-guard.js'
 import type { AuditService } from '../audit/service.js'
 import { apiFailure, apiSuccess } from '../contracts/http.js'
 import {
+  completeDocumentExtractionRequestSchema,
   createDocumentExtractionRequestSchema,
   documentExtractionListQuerySchema,
   extractionIdempotencyKeySchema,
   reviewDocumentExtractionRequestSchema,
+  type CompleteDocumentExtractionRequest,
   type CreateDocumentExtractionRequest,
   type ReviewDocumentExtractionRequest,
 } from '../contracts/extractions.js'
@@ -37,29 +39,16 @@ export async function registerExtractionRoutes(
       markSensitiveResponse(reply)
       const context = await requireAuthenticated(request, authRepository)
       requirePermission(context, 'document:read')
-
       const parsedDocumentId = documentIdSchema.safeParse(request.params.documentId)
       const parsedQuery = documentExtractionListQuerySchema.safeParse(request.query ?? {})
       if (!parsedDocumentId.success || !parsedQuery.success) {
-        return reply.code(400).send(apiFailure(
-          'VALIDATION_ERROR',
-          'Extraction query parameters are invalid.',
-          request.id,
-          parsedQuery.success ? undefined : parsedQuery.error.flatten().fieldErrors,
-        ))
+        return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Extraction query parameters are invalid.', request.id, parsedQuery.success ? undefined : parsedQuery.error.flatten().fieldErrors))
       }
-
       try {
-        const result = await extractionRepository.list({
-          organizationId: context.user.organizationId,
-          documentId: parsedDocumentId.data,
-          ...parsedQuery.data,
-        })
+        const result = await extractionRepository.list({ organizationId: context.user.organizationId, documentId: parsedDocumentId.data, ...parsedQuery.data })
         return reply.send(apiSuccess(result, request.id))
       } catch (error) {
-        if (error instanceof Error && error.message === 'INVALID_CURSOR') {
-          return reply.code(400).send(apiFailure('INVALID_CURSOR', 'Extraction cursor is invalid.', request.id))
-        }
+        if (error instanceof Error && error.message === 'INVALID_CURSOR') return reply.code(400).send(apiFailure('INVALID_CURSOR', 'Extraction cursor is invalid.', request.id))
         throw error
       }
     },
@@ -72,40 +61,18 @@ export async function registerExtractionRoutes(
       markSensitiveResponse(reply)
       const context = await requireAuthenticated(request, authRepository)
       requirePermission(context, 'document:manage')
-
       const parsedDocumentId = documentIdSchema.safeParse(request.params.documentId)
       const parsedBody = createDocumentExtractionRequestSchema.safeParse(request.body)
       const parsedIdempotencyKey = extractionIdempotencyKeySchema.safeParse(request.headers['idempotency-key'])
       if (!parsedDocumentId.success || !parsedBody.success || !parsedIdempotencyKey.success) {
-        return reply.code(400).send(apiFailure(
-          'VALIDATION_ERROR',
-          'Document ID, extraction request, or Idempotency-Key header is invalid.',
-          request.id,
-          parsedBody.success ? undefined : parsedBody.error.flatten().fieldErrors,
-        ))
+        return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Document ID, extraction request, or Idempotency-Key header is invalid.', request.id, parsedBody.success ? undefined : parsedBody.error.flatten().fieldErrors))
       }
-
       try {
-        const extraction = await extractionRepository.createOrReplay({
-          organizationId: context.user.organizationId,
-          documentId: parsedDocumentId.data,
-          schemaVersion: parsedBody.data.schemaVersion,
-          idempotencyKey: parsedIdempotencyKey.data,
-        })
-        await auditService.record({
-          organizationId: context.user.organizationId,
-          actorUserId: context.user.id,
-          action: 'document.extraction_requested',
-          resourceType: 'document_extraction',
-          resourceId: extraction.id,
-          requestId: request.id,
-          metadata: { documentId: extraction.documentId, schemaVersion: extraction.schemaVersion },
-        })
+        const extraction = await extractionRepository.createOrReplay({ organizationId: context.user.organizationId, documentId: parsedDocumentId.data, schemaVersion: parsedBody.data.schemaVersion, idempotencyKey: parsedIdempotencyKey.data })
+        await auditService.record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'document.extraction_requested', resourceType: 'document_extraction', resourceId: extraction.id, requestId: request.id, metadata: { documentId: extraction.documentId, schemaVersion: extraction.schemaVersion } })
         return reply.code(202).send(apiSuccess(extraction, request.id))
       } catch (error) {
-        if (error instanceof Error && error.message === 'DOCUMENT_NOT_FOUND') {
-          return reply.code(404).send(apiFailure('NOT_FOUND', 'Document was not found.', request.id))
-        }
+        if (error instanceof Error && error.message === 'DOCUMENT_NOT_FOUND') return reply.code(404).send(apiFailure('NOT_FOUND', 'Document was not found.', request.id))
         throw error
       }
     },
@@ -118,57 +85,42 @@ export async function registerExtractionRoutes(
       markSensitiveResponse(reply)
       const context = await requireAuthenticated(request, authRepository)
       requirePermission(context, 'document:manage')
-
       const parsedDocumentId = documentIdSchema.safeParse(request.params.documentId)
       const parsedExtractionId = extractionIdSchema.safeParse(request.params.extractionId)
       const parsedBody = reviewDocumentExtractionRequestSchema.safeParse(request.body)
-      if (!parsedDocumentId.success || !parsedExtractionId.success || !parsedBody.success) {
-        return reply.code(400).send(apiFailure(
-          'VALIDATION_ERROR',
-          'Document ID, extraction ID, or review data is invalid.',
-          request.id,
-          parsedBody.success ? undefined : parsedBody.error.flatten().fieldErrors,
-        ))
-      }
-
+      if (!parsedDocumentId.success || !parsedExtractionId.success || !parsedBody.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Document ID, extraction ID, or review data is invalid.', request.id, parsedBody.success ? undefined : parsedBody.error.flatten().fieldErrors))
       try {
-        const extraction = await extractionRepository.review({
-          organizationId: context.user.organizationId,
-          documentId: parsedDocumentId.data,
-          extractionId: parsedExtractionId.data,
-          ...parsedBody.data,
-        })
-        await auditService.record({
-          organizationId: context.user.organizationId,
-          actorUserId: context.user.id,
-          action: 'document.extraction_reviewed',
-          resourceType: 'document_extraction',
-          resourceId: extraction.id,
-          requestId: request.id,
-          metadata: {
-            documentId: extraction.documentId,
-            reviewedFieldKeys: parsedBody.data.fields.map((field) => field.key),
-          },
-        })
+        const extraction = await extractionRepository.review({ organizationId: context.user.organizationId, documentId: parsedDocumentId.data, extractionId: parsedExtractionId.data, ...parsedBody.data })
+        await auditService.record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'document.extraction_reviewed', resourceType: 'document_extraction', resourceId: extraction.id, requestId: request.id, metadata: { documentId: extraction.documentId, reviewedFieldKeys: parsedBody.data.fields.map((field) => field.key) } })
         return reply.send(apiSuccess(extraction, request.id))
       } catch (error) {
-        if (error instanceof Error && error.message === 'EXTRACTION_NOT_FOUND') {
-          return reply.code(404).send(apiFailure('NOT_FOUND', 'Extraction was not found.', request.id))
-        }
-        if (error instanceof Error && error.message === 'EXTRACTION_REVIEW_FIELD_NOT_FOUND') {
-          return reply.code(409).send(apiFailure(
-            'EXTRACTION_REVIEW_FIELD_NOT_FOUND',
-            'One or more reviewed fields are no longer present in the extraction.',
-            request.id,
-          ))
-        }
-        if (error instanceof Error && error.message === 'EXTRACTION_REVIEW_CONFLICT') {
-          return reply.code(409).send(apiFailure(
-            'EXTRACTION_REVIEW_CONFLICT',
-            'Extraction changed before this review could be applied.',
-            request.id,
-          ))
-        }
+        if (error instanceof Error && error.message === 'EXTRACTION_NOT_FOUND') return reply.code(404).send(apiFailure('NOT_FOUND', 'Extraction was not found.', request.id))
+        if (error instanceof Error && error.message === 'EXTRACTION_REVIEW_FIELD_NOT_FOUND') return reply.code(409).send(apiFailure('EXTRACTION_REVIEW_FIELD_NOT_FOUND', 'One or more reviewed fields are no longer present in the extraction.', request.id))
+        if (error instanceof Error && error.message === 'EXTRACTION_REVIEW_CONFLICT') return reply.code(409).send(apiFailure('EXTRACTION_REVIEW_CONFLICT', 'Extraction changed before this review could be applied.', request.id))
+        throw error
+      }
+    },
+  )
+
+  app.post<{ Params: { documentId: string; extractionId: string }; Body: CompleteDocumentExtractionRequest }>(
+    '/api/v1/documents/:documentId/extractions/:extractionId/complete',
+    async (request, reply) => {
+      assertTrustedOrigin(request)
+      markSensitiveResponse(reply)
+      const context = await requireAuthenticated(request, authRepository)
+      requirePermission(context, 'document:manage')
+      const parsedDocumentId = documentIdSchema.safeParse(request.params.documentId)
+      const parsedExtractionId = extractionIdSchema.safeParse(request.params.extractionId)
+      const parsedBody = completeDocumentExtractionRequestSchema.safeParse(request.body)
+      if (!parsedDocumentId.success || !parsedExtractionId.success || !parsedBody.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Document ID, extraction ID, or completion data is invalid.', request.id, parsedBody.success ? undefined : parsedBody.error.flatten().fieldErrors))
+      try {
+        const extraction = await extractionRepository.complete({ organizationId: context.user.organizationId, documentId: parsedDocumentId.data, extractionId: parsedExtractionId.data, ...parsedBody.data })
+        await auditService.record({ organizationId: context.user.organizationId, actorUserId: context.user.id, action: 'document.extraction_completed', resourceType: 'document_extraction', resourceId: extraction.id, requestId: request.id, metadata: { documentId: extraction.documentId } })
+        return reply.send(apiSuccess(extraction, request.id))
+      } catch (error) {
+        if (error instanceof Error && error.message === 'EXTRACTION_NOT_FOUND') return reply.code(404).send(apiFailure('NOT_FOUND', 'Extraction was not found.', request.id))
+        if (error instanceof Error && error.message === 'EXTRACTION_COMPLETION_INVALID_STATE') return reply.code(409).send(apiFailure('EXTRACTION_COMPLETION_INVALID_STATE', 'Only an extraction requiring review can be completed.', request.id))
+        if (error instanceof Error && error.message === 'EXTRACTION_COMPLETION_CONFLICT') return reply.code(409).send(apiFailure('EXTRACTION_COMPLETION_CONFLICT', 'Extraction changed before completion could be applied.', request.id))
         throw error
       }
     },
