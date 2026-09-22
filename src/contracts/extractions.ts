@@ -57,11 +57,38 @@ export const documentExtractionListResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 }).strict();
 
+// PATCH /api/v1/documents/:documentId/extractions/:extractionId/review
+// Review is deliberately narrow: reviewers may correct extracted values, but
+// cannot select tenant/provider/model or mutate confidence/source provenance.
+// expectedUpdatedAt is an optimistic concurrency token from the last GET.
+export const reviewExtractionFieldSchema = z.object({
+  key: z.string().trim().min(1).max(128),
+  value: extractionFieldValueSchema,
+}).strict();
+
+export const reviewDocumentExtractionRequestSchema = z.object({
+  expectedUpdatedAt: z.string().datetime(),
+  fields: z.array(reviewExtractionFieldSchema).min(1).max(256),
+}).strict().superRefine((value, context) => {
+  const keys = new Set<string>();
+  for (const field of value.fields) {
+    if (keys.has(field.key)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['fields'],
+        message: `Duplicate review field key: ${field.key}`,
+      });
+    }
+    keys.add(field.key);
+  }
+});
+
 export const extractionIdempotencyKeySchema = z.string().trim().min(1).max(255);
 
 export type ExtractionStatus = z.infer<typeof extractionStatusSchema>;
 export type ExtractionField = z.infer<typeof extractionFieldSchema>;
 export type DocumentExtraction = z.infer<typeof documentExtractionSchema>;
 export type CreateDocumentExtractionRequest = z.infer<typeof createDocumentExtractionRequestSchema>;
+export type ReviewDocumentExtractionRequest = z.infer<typeof reviewDocumentExtractionRequestSchema>;
 export type DocumentExtractionListQuery = z.infer<typeof documentExtractionListQuerySchema>;
 export type DocumentExtractionListResponse = z.infer<typeof documentExtractionListResponseSchema>;
