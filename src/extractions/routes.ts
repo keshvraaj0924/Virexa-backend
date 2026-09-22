@@ -9,12 +9,15 @@ import {
   createDocumentExtractionRequestSchema,
   documentExtractionListQuerySchema,
   extractionIdempotencyKeySchema,
+  reviewDocumentExtractionRequestSchema,
   type CreateDocumentExtractionRequest,
+  type ReviewDocumentExtractionRequest,
 } from '../contracts/extractions.js'
 import { markSensitiveResponse } from '../http/cache-policy.js'
 import type { DocumentExtractionRepository } from './repository.js'
 
 const documentIdSchema = z.string().uuid()
+const extractionIdSchema = z.string().uuid()
 
 export interface ExtractionRouteDependencies {
   authRepository: AuthRepository
@@ -102,6 +105,69 @@ export async function registerExtractionRoutes(
       } catch (error) {
         if (error instanceof Error && error.message === 'DOCUMENT_NOT_FOUND') {
           return reply.code(404).send(apiFailure('NOT_FOUND', 'Document was not found.', request.id))
+        }
+        throw error
+      }
+    },
+  )
+
+  app.patch<{ Params: { documentId: string; extractionId: string }; Body: ReviewDocumentExtractionRequest }>(
+    '/api/v1/documents/:documentId/extractions/:extractionId/review',
+    async (request, reply) => {
+      assertTrustedOrigin(request)
+      markSensitiveResponse(reply)
+      const context = await requireAuthenticated(request, authRepository)
+      requirePermission(context, 'document:manage')
+
+      const parsedDocumentId = documentIdSchema.safeParse(request.params.documentId)
+      const parsedExtractionId = extractionIdSchema.safeParse(request.params.extractionId)
+      const parsedBody = reviewDocumentExtractionRequestSchema.safeParse(request.body)
+      if (!parsedDocumentId.success || !parsedExtractionId.success || !parsedBody.success) {
+        return reply.code(400).send(apiFailure(
+          'VALIDATION_ERROR',
+          'Document ID, extraction ID, or review data is invalid.',
+          request.id,
+          parsedBody.success ? undefined : parsedBody.error.flatten().fieldErrors,
+        ))
+      }
+
+      try {
+        const extraction = await extractionRepository.review({
+          organizationId: context.user.organizationId,
+          documentId: parsedDocumentId.data,
+          extractionId: parsedExtractionId.data,
+          ...parsedBody.data,
+        })
+        await auditService.record({
+          organizationId: context.user.organizationId,
+          actorUserId: context.user.id,
+          action: 'document.extraction_reviewed',
+          resourceType: 'document_extraction',
+          resourceId: extraction.id,
+          requestId: request.id,
+          metadata: {
+            documentId: extraction.documentId,
+            reviewedFieldKeys: parsedBody.data.fields.map((field) => field.key),
+          },
+        })
+        return reply.send(apiSuccess(extraction, request.id))
+      } catch (error) {
+        if (error instanceof Error && error.message === 'EXTRACTION_NOT_FOUND') {
+          return reply.code(404).send(apiFailure('NOT_FOUND', 'Extraction was not found.', request.id))
+        }
+        if (error instanceof Error && error.message === 'EXTRACTION_REVIEW_FIELD_NOT_FOUND') {
+          return reply.code(409).send(apiFailure(
+            'EXTRACTION_REVIEW_FIELD_NOT_FOUND',
+            'One or more reviewed fields are no longer present in the extraction.',
+            request.id,
+          ))
+        }
+        if (error instanceof Error && error.message === 'EXTRACTION_REVIEW_CONFLICT') {
+          return reply.code(409).send(apiFailure(
+            'EXTRACTION_REVIEW_CONFLICT',
+            'Extraction changed before this review could be applied.',
+            request.id,
+          ))
         }
         throw error
       }
