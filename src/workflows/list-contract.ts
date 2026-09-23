@@ -4,7 +4,13 @@ import { InvalidWorkflowCursorError } from './repository.js'
 
 export type WorkflowListQueryParseResult =
   | { success: true; data: WorkflowListQuery }
-  | { success: false; fieldErrors: Record<string, string[] | undefined> }
+  | { success: false; fieldErrors: Record<string, string[]> }
+
+function compactFieldErrors(fieldErrors: Record<string, string[] | undefined>): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(fieldErrors).filter((entry): entry is [string, string[]] => entry[1] !== undefined),
+  )
+}
 
 /**
  * Parse the public GET /api/v1/workflows query contract in one place so the
@@ -13,7 +19,7 @@ export type WorkflowListQueryParseResult =
 export function parseWorkflowListQuery(query: FastifyRequest['query']): WorkflowListQueryParseResult {
   const parsed = workflowListQuerySchema.safeParse(query ?? {})
   if (!parsed.success) {
-    return { success: false, fieldErrors: parsed.error.flatten().fieldErrors }
+    return { success: false, fieldErrors: compactFieldErrors(parsed.error.flatten().fieldErrors) }
   }
   return { success: true, data: parsed.data }
 }
