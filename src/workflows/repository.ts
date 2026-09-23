@@ -2,10 +2,16 @@ import { createHash } from 'node:crypto'
 import { Pool } from 'pg'
 import type { CreateWorkflowRequest, UpdateWorkflowRequest, Workflow, WorkflowStatus } from '../contracts/workflows.js'
 
+export interface WorkflowListPage {
+  items: Workflow[]
+  nextCursor: string | null
+}
+
 export interface WorkflowRepository {
   create(organizationId: string, userId: string, input: CreateWorkflowRequest): Promise<Workflow>
   createIdempotent(organizationId: string, userId: string, input: CreateWorkflowRequest, idempotencyKey: string): Promise<{ workflow: Workflow; replayed: boolean }>
   list(organizationId: string, limit: number): Promise<Workflow[]>
+  listPage(organizationId: string, input: { limit: number; status?: WorkflowStatus; cursor?: string }): Promise<WorkflowListPage>
   getById(organizationId: string, workflowId: string): Promise<Workflow | null>
   update(organizationId: string, workflowId: string, input: UpdateWorkflowRequest, expectedStatus?: WorkflowStatus): Promise<Workflow | null>
   close?(): Promise<void>
@@ -15,6 +21,13 @@ export class IdempotencyKeyReuseError extends Error {
   constructor() {
     super('The idempotency key was already used with a different request.')
     this.name = 'IDEMPOTENCY_KEY_REUSED'
+  }
+}
+
+export class InvalidWorkflowCursorError extends Error {
+  constructor() {
+    super('The workflow cursor is invalid.')
+    this.name = 'INVALID_WORKFLOW_CURSOR'
   }
 }
 
@@ -40,6 +53,25 @@ function normalizedCreatePayload(input: CreateWorkflowRequest): CreateWorkflowRe
 
 function requestHash(input: CreateWorkflowRequest): string {
   return createHash('sha256').update(JSON.stringify(normalizedCreatePayload(input))).digest('hex')
+}
+
+type WorkflowCursor = { createdAt: string; id: string }
+
+function encodeWorkflowCursor(workflow: Workflow): string {
+  return Buffer.from(JSON.stringify({ createdAt: workflow.createdAt, id: workflow.id } satisfies WorkflowCursor), 'utf8').toString('base64url')
+}
+
+function decodeWorkflowCursor(cursor: string): WorkflowCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as Partial<WorkflowCursor>
+    if (typeof parsed.createdAt !== 'string' || Number.isNaN(Date.parse(parsed.createdAt)) || typeof parsed.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.id)) {
+      throw new InvalidWorkflowCursorError()
+    }
+    return { createdAt: parsed.createdAt, id: parsed.id }
+  } catch (error) {
+    if (error instanceof InvalidWorkflowCursorError) throw error
+    throw new InvalidWorkflowCursorError()
+  }
 }
 
 export class PostgresWorkflowRepository implements WorkflowRepository {
@@ -112,6 +144,29 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async list(organizationId: string, limit: number) {
     const result = await this.pool.query(`SELECT ${columns} FROM workflows WHERE organization_id = $1 ORDER BY created_at DESC LIMIT $2`, [organizationId, limit])
     return result.rows.map(mapWorkflow)
+  }
+
+  async listPage(organizationId: string, input: { limit: number; status?: WorkflowStatus; cursor?: string }) {
+    const values: unknown[] = [organizationId]
+    const predicates = ['organization_id = $1']
+    if (input.status !== undefined) {
+      values.push(input.status)
+      predicates.push(`status = $${values.length}`)
+    }
+    if (input.cursor !== undefined) {
+      const cursor = decodeWorkflowCursor(input.cursor)
+      values.push(cursor.createdAt, cursor.id)
+      predicates.push(`(created_at, id) < ($${values.length - 1}::timestamptz, $${values.length}::uuid)`)
+    }
+    values.push(input.limit + 1)
+    const result = await this.pool.query(
+      `SELECT ${columns} FROM workflows WHERE ${predicates.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    )
+    const mapped = result.rows.map(mapWorkflow)
+    const hasMore = mapped.length > input.limit
+    const items = hasMore ? mapped.slice(0, input.limit) : mapped
+    return { items, nextCursor: hasMore && items.length > 0 ? encodeWorkflowCursor(items[items.length - 1]) : null }
   }
 
   async getById(organizationId: string, workflowId: string) {
