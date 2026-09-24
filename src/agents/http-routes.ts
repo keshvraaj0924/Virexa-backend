@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { apiFailure, apiSuccess } from '../contracts/http.js'
-import { requireAnyPermission, requireAuthenticated, requirePermission, type AuthenticatedContext } from '../auth/context.js'
+import { requireAnyPermission, requireAuthenticated, requirePermission } from '../auth/context.js'
 import type { AuthRepository } from '../auth/repository.js'
 import type { AuditService } from '../audit/service.js'
 import { assertTrustedOrigin } from '../auth/origin-guard.js'
@@ -24,16 +24,12 @@ function isHierarchyConstraintError(error: unknown): boolean {
   return code === '23503'
 }
 
-async function contextFor(request: Parameters<typeof requireAuthenticated>[0], authRepository: AuthRepository): Promise<AuthenticatedContext> {
-  return requireAuthenticated(request, authRepository)
-}
-
 export const agentRoutes: FastifyPluginAsync<AgentRoutesOptions> = async (app, options) => {
   const { authRepository, agentRepository, auditService } = options
 
   app.get('/api/v1/agents', async (request, reply) => {
     markSensitiveResponse(reply)
-    const context = await contextFor(request, authRepository)
+    const context = await requireAuthenticated(request, authRepository)
     requirePermission(context, 'agent:read')
     const parsed = listAgentsQuerySchema.safeParse(request.query ?? {})
     if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent query parameters are invalid.', request.id, parsed.error.flatten().fieldErrors))
@@ -47,7 +43,7 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesOptions> = async (app, o
 
   app.post<{ Body: CreateAgentInput }>('/api/v1/agents', async (request, reply) => {
     assertTrustedOrigin(request)
-    const context = await contextFor(request, authRepository)
+    const context = await requireAuthenticated(request, authRepository)
     requirePermission(context, 'agent:create')
     const parsed = createAgentSchema.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent data is invalid.', request.id, parsed.error.flatten().fieldErrors))
@@ -67,7 +63,7 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesOptions> = async (app, o
 
   app.get<{ Params: { agentId: string } }>('/api/v1/agents/:agentId', async (request, reply) => {
     markSensitiveResponse(reply)
-    const context = await contextFor(request, authRepository)
+    const context = await requireAuthenticated(request, authRepository)
     requirePermission(context, 'agent:read')
     const parsedId = agentIdSchema.safeParse(request.params.agentId)
     if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent ID is invalid.', request.id))
@@ -78,7 +74,7 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesOptions> = async (app, o
 
   app.patch<{ Params: { agentId: string }; Body: UpdateAgentInput }>('/api/v1/agents/:agentId', async (request, reply) => {
     assertTrustedOrigin(request)
-    const context = await contextFor(request, authRepository)
+    const context = await requireAuthenticated(request, authRepository)
     requireAnyPermission(context, ['agent:create', 'agent:manage'])
     const parsedId = agentIdSchema.safeParse(request.params.agentId)
     if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent ID is invalid.', request.id))
