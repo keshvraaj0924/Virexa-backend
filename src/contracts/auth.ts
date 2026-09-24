@@ -11,6 +11,9 @@ export type Permission =
   | 'document:read'
   | 'document:create'
   | 'document:manage'
+  | 'agent:read'
+  | 'agent:create'
+  | 'agent:manage'
 
 export type ApiErrorCode =
   | 'VALIDATION_ERROR'

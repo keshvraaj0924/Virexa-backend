@@ -12,11 +12,11 @@ export class PermissionDeniedError extends Error {
 export { type AuthenticatedContext, type Permission }
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
-  super_admin: ['platform:read', 'platform:manage', 'organization:manage', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage', 'document:read', 'document:create', 'document:manage'],
-  admin: ['platform:read', 'organization:manage', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage', 'document:read', 'document:create', 'document:manage'],
-  manager: ['platform:read', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage', 'document:read', 'document:create', 'document:manage'],
-  operator: ['platform:read', 'workflow:read', 'workflow:create', 'document:read', 'document:create'],
-  viewer: ['platform:read', 'workflow:read', 'document:read'],
+  super_admin: ['platform:read', 'platform:manage', 'organization:manage', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage', 'document:read', 'document:create', 'document:manage', 'agent:read', 'agent:create', 'agent:manage'],
+  admin: ['platform:read', 'organization:manage', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage', 'document:read', 'document:create', 'document:manage', 'agent:read', 'agent:create', 'agent:manage'],
+  manager: ['platform:read', 'audit:read', 'workflow:read', 'workflow:create', 'workflow:manage', 'document:read', 'document:create', 'document:manage', 'agent:read', 'agent:create', 'agent:manage'],
+  operator: ['platform:read', 'workflow:read', 'workflow:create', 'document:read', 'document:create', 'agent:read', 'agent:create'],
+  viewer: ['platform:read', 'workflow:read', 'document:read', 'agent:read'],
 }
 
 export async function requireAuthenticated(request: FastifyRequest, repository: AuthRepository): Promise<AuthenticatedContext> {
