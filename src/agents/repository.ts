@@ -1,15 +1,20 @@
+import { createHash } from 'node:crypto'
 import { Pool } from 'pg'
 import type { AgentProjection, AgentStatus, CreateAgentInput, UpdateAgentInput } from './contracts.js'
 
 export interface AgentListPage { items: AgentProjection[]; nextCursor: string | null }
 export interface AgentRepository {
   create(organizationId: string, userId: string, input: CreateAgentInput): Promise<AgentProjection>
+  createIdempotent(organizationId: string, userId: string, input: CreateAgentInput, idempotencyKey: string): Promise<{ agent: AgentProjection; replayed: boolean }>
   listPage(organizationId: string, input: { limit: number; status?: AgentStatus; cursor?: string }): Promise<AgentListPage>
   getById(organizationId: string, agentId: string): Promise<AgentProjection | null>
   update(organizationId: string, agentId: string, input: UpdateAgentInput): Promise<AgentProjection | null>
   close?(): Promise<void>
 }
 
+export class AgentIdempotencyKeyReuseError extends Error {
+  constructor() { super('The idempotency key was already used with a different request.'); this.name = 'AGENT_IDEMPOTENCY_KEY_REUSED' }
+}
 export class InvalidAgentCursorError extends Error {
   constructor() { super('The agent cursor is invalid.'); this.name = 'INVALID_AGENT_CURSOR' }
 }
@@ -24,6 +29,16 @@ function mapAgent(row: any): AgentProjection {
     instructions: row.instructions, status: row.status as AgentStatus, version: row.version,
     createdByUserId: row.created_by_user_id, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
   }
+}
+function normalizedCreatePayload(input: CreateAgentInput): CreateAgentInput {
+  return {
+    name: input.name.trim(), description: input.description?.trim() || null,
+    personaId: input.personaId ?? null, branchId: input.branchId ?? null, departmentId: input.departmentId ?? null,
+    instructions: input.instructions.trim(),
+  }
+}
+function requestHash(input: CreateAgentInput): string {
+  return createHash('sha256').update(JSON.stringify(normalizedCreatePayload(input))).digest('hex')
 }
 function encodeCursor(agent: AgentProjection) {
   return Buffer.from(JSON.stringify({ createdAt: agent.createdAt, id: agent.id } satisfies AgentCursor), 'utf8').toString('base64url')
@@ -40,12 +55,62 @@ export class PostgresAgentRepository implements AgentRepository {
   constructor(private readonly pool: Pool) {}
 
   async create(organizationId: string, userId: string, input: CreateAgentInput) {
+    const normalized = normalizedCreatePayload(input)
     const result = await this.pool.query(
       `INSERT INTO agents (organization_id, created_by_user_id, name, description, persona_id, branch_id, department_id, instructions)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${columns}`,
-      [organizationId, userId, input.name.trim(), input.description?.trim() || null, input.personaId ?? null, input.branchId ?? null, input.departmentId ?? null, input.instructions.trim()],
+      [organizationId, userId, normalized.name, normalized.description, normalized.personaId, normalized.branchId, normalized.departmentId, normalized.instructions],
     )
     return mapAgent(result.rows[0])
+  }
+
+  async createIdempotent(organizationId: string, userId: string, input: CreateAgentInput, idempotencyKey: string) {
+    const normalized = normalizedCreatePayload(input)
+    const hash = requestHash(normalized)
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const inserted = await client.query(
+        `INSERT INTO agent_idempotency_keys (organization_id, idempotency_key, request_hash)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (organization_id, idempotency_key) DO NOTHING
+         RETURNING request_hash, agent_id`,
+        [organizationId, idempotencyKey, hash],
+      )
+      let keyRecord = inserted.rows[0]
+      const replayed = !keyRecord
+      if (!keyRecord) {
+        const existing = await client.query(
+          `SELECT request_hash, agent_id FROM agent_idempotency_keys
+           WHERE organization_id = $1 AND idempotency_key = $2 FOR UPDATE`,
+          [organizationId, idempotencyKey],
+        )
+        keyRecord = existing.rows[0]
+        if (!keyRecord) throw new Error('Agent idempotency reservation disappeared before it could be read')
+      }
+      if (keyRecord.request_hash !== hash) throw new AgentIdempotencyKeyReuseError()
+      if (keyRecord.agent_id) {
+        const existing = await client.query(`SELECT ${columns} FROM agents WHERE organization_id = $1 AND id = $2`, [organizationId, keyRecord.agent_id])
+        if (!existing.rows[0]) throw new Error('Agent idempotency record references a missing agent')
+        await client.query('COMMIT')
+        return { agent: mapAgent(existing.rows[0]), replayed: true }
+      }
+      const agentResult = await client.query(
+        `INSERT INTO agents (organization_id, created_by_user_id, name, description, persona_id, branch_id, department_id, instructions)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${columns}`,
+        [organizationId, userId, normalized.name, normalized.description, normalized.personaId, normalized.branchId, normalized.departmentId, normalized.instructions],
+      )
+      const agent = mapAgent(agentResult.rows[0])
+      await client.query(
+        `UPDATE agent_idempotency_keys SET agent_id = $3 WHERE organization_id = $1 AND idempotency_key = $2`,
+        [organizationId, idempotencyKey, agent.id],
+      )
+      await client.query('COMMIT')
+      return { agent, replayed }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally { client.release() }
   }
 
   async listPage(organizationId: string, input: { limit: number; status?: AgentStatus; cursor?: string }) {
