@@ -6,11 +6,11 @@ import type { AuthRepository } from '../auth/repository.js'
 import type { AuditService } from '../audit/service.js'
 import { assertTrustedOrigin } from '../auth/origin-guard.js'
 import { markSensitiveResponse } from '../http/cache-policy.js'
-import { createAgentSchema, listAgentsQuerySchema, updateAgentSchema, type CreateAgentInput, type UpdateAgentInput } from './contracts.js'
+import { createAgentSchema, listAgentsQuerySchema, updateAgentSchema } from './contracts.js'
 import { AgentIdempotencyKeyReuseError, InvalidAgentCursorError, type AgentRepository } from './repository.js'
 import { canManageAgent, canTransitionAgentStatus } from './policy.js'
 
-const agentIdSchema = z.string().uuid()
+const agentParamsSchema = z.object({ agentId: z.string().uuid() }).strict()
 const idempotencyKeySchema = z.string().trim().min(16).max(255)
 
 export interface AgentRoutesOptions {
@@ -41,7 +41,7 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesOptions> = async (app, o
     }
   })
 
-  app.post<{ Body: CreateAgentInput }>('/api/v1/agents', async (request, reply) => {
+  app.post('/api/v1/agents', async (request, reply) => {
     assertTrustedOrigin(request)
     const context = await requireAuthenticated(request, authRepository)
     requirePermission(context, 'agent:create')
@@ -61,26 +61,26 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesOptions> = async (app, o
     }
   })
 
-  app.get<{ Params: { agentId: string } }>('/api/v1/agents/:agentId', async (request, reply) => {
+  app.get('/api/v1/agents/:agentId', async (request, reply) => {
     markSensitiveResponse(reply)
     const context = await requireAuthenticated(request, authRepository)
     requirePermission(context, 'agent:read')
-    const parsedId = agentIdSchema.safeParse(request.params.agentId)
-    if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent ID is invalid.', request.id))
-    const agent = await agentRepository.getById(context.user.organizationId, parsedId.data)
+    const parsedParams = agentParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent ID is invalid.', request.id))
+    const agent = await agentRepository.getById(context.user.organizationId, parsedParams.data.agentId)
     if (!agent) return reply.code(404).send(apiFailure('NOT_FOUND', 'Agent was not found.', request.id))
     return reply.send(apiSuccess(agent, request.id))
   })
 
-  app.patch<{ Params: { agentId: string }; Body: UpdateAgentInput }>('/api/v1/agents/:agentId', async (request, reply) => {
+  app.patch('/api/v1/agents/:agentId', async (request, reply) => {
     assertTrustedOrigin(request)
     const context = await requireAuthenticated(request, authRepository)
     requireAnyPermission(context, ['agent:create', 'agent:manage'])
-    const parsedId = agentIdSchema.safeParse(request.params.agentId)
-    if (!parsedId.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent ID is invalid.', request.id))
+    const parsedParams = agentParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent ID is invalid.', request.id))
     const parsed = updateAgentSchema.safeParse(request.body)
     if (!parsed.success) return reply.code(400).send(apiFailure('VALIDATION_ERROR', 'Agent update data is invalid.', request.id, parsed.error.flatten().fieldErrors))
-    const existing = await agentRepository.getById(context.user.organizationId, parsedId.data)
+    const existing = await agentRepository.getById(context.user.organizationId, parsedParams.data.agentId)
     if (!existing) return reply.code(404).send(apiFailure('NOT_FOUND', 'Agent was not found.', request.id))
     if (!canManageAgent(context, existing)) return reply.code(403).send(apiFailure('FORBIDDEN', 'You cannot modify this agent.', request.id))
     if (parsed.data.expectedVersion !== existing.version) return reply.code(409).send(apiFailure('AGENT_CONFLICT', 'Agent changed before this update could be applied.', request.id))
