@@ -68,7 +68,7 @@ describe('Agent HTTP routes', () => {
     const { app, agentRepository } = createTestApp()
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/agents?organizationId=org-tenant-b&limit=24',
+      url: '/api/v1/agents?limit=24',
       headers: { cookie: 'virexa_session=valid-session' },
     })
     expect(response.statusCode).toBe(200)
