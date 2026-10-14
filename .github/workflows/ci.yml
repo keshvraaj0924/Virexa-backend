@@ -41,7 +41,7 @@ jobs:
         run: npm run typecheck
       - name: Prepare test database
         run: |
-          for migration in migrations/001_auth.sql migrations/002_audit_events.sql migrations/003_workflows.sql migrations/004_workflow_idempotency.sql; do
+          for migration in migrations/[0-9][0-9][0-9]_*.sql; do
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
         env:
@@ -70,7 +70,7 @@ jobs:
       - name: Test gate
         if: always()
         run: |
-          if [ "${{ steps.unit-tests.conclusion }}" != "success" ] || [ "${{ steps.integration-tests.conclusion }}" != "success" ]; then
+          if [ "${{ steps.unit-tests.outcome }}" != "success" ] || [ "${{ steps.integration-tests.outcome }}" != "success" ]; then
             echo "One or more test suites failed. See the backend-test-output artifact for complete diagnostics."
             exit 1
           fi
