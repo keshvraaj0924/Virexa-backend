@@ -71,26 +71,26 @@ export class PostgresAgentRepository implements AgentRepository {
     try {
       await client.query('BEGIN')
       const inserted = await client.query(
-        `INSERT INTO agent_idempotency_keys (organization_id, idempotency_key, request_hash)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (organization_id, idempotency_key) DO NOTHING
+        `INSERT INTO agent_idempotency_keys (organization_id, created_by_user_id, idempotency_key, request_hash)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (organization_id, created_by_user_id, idempotency_key) DO NOTHING
          RETURNING request_hash, agent_id`,
-        [organizationId, idempotencyKey, hash],
+        [organizationId, userId, idempotencyKey, hash],
       )
       let keyRecord = inserted.rows[0]
       const replayed = !keyRecord
       if (!keyRecord) {
         const existing = await client.query(
           `SELECT request_hash, agent_id FROM agent_idempotency_keys
-           WHERE organization_id = $1 AND idempotency_key = $2 FOR UPDATE`,
-          [organizationId, idempotencyKey],
+           WHERE organization_id = $1 AND created_by_user_id = $2 AND idempotency_key = $3 FOR UPDATE`,
+          [organizationId, userId, idempotencyKey],
         )
         keyRecord = existing.rows[0]
         if (!keyRecord) throw new Error('Agent idempotency reservation disappeared before it could be read')
       }
       if (keyRecord.request_hash !== hash) throw new AgentIdempotencyKeyReuseError()
       if (keyRecord.agent_id) {
-        const existing = await client.query(`SELECT ${columns} FROM agents WHERE organization_id = $1 AND id = $2`, [organizationId, keyRecord.agent_id])
+        const existing = await client.query(`SELECT ${columns} FROM agents WHERE organization_id = $1 AND id = $2 AND created_by_user_id = $3`, [organizationId, keyRecord.agent_id, userId])
         if (!existing.rows[0]) throw new Error('Agent idempotency record references a missing agent')
         await client.query('COMMIT')
         return { agent: mapAgent(existing.rows[0]), replayed: true }
@@ -102,8 +102,8 @@ export class PostgresAgentRepository implements AgentRepository {
       )
       const agent = mapAgent(agentResult.rows[0])
       await client.query(
-        `UPDATE agent_idempotency_keys SET agent_id = $3 WHERE organization_id = $1 AND idempotency_key = $2`,
-        [organizationId, idempotencyKey, agent.id],
+        `UPDATE agent_idempotency_keys SET agent_id = $4 WHERE organization_id = $1 AND created_by_user_id = $2 AND idempotency_key = $3`,
+        [organizationId, userId, idempotencyKey, agent.id],
       )
       await client.query('COMMIT')
       return { agent, replayed }
