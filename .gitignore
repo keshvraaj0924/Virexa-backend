@@ -1,0 +1,24 @@
+# Dependencies, builds and test artifacts
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+
+# Local secrets; keep shareable examples tracked
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+
+# Private keys and certificates
+*.pem
+*.p12
+*.pfx
+*.key
+
+# Editors and OS metadata
+.DS_Store
+.idea/
+.vscode/
