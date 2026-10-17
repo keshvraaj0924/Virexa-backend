@@ -1,4 +1,5 @@
 from datetime import timezone
+from hmac import compare_digest
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +14,18 @@ from app.db.models import Organization, Session, User
 from app.domain.auth.schemas import RegisterRequest
 
 
-async def issue_session(db: AsyncSession, user: User, ttl: int) -> tuple[str, Session]:
+async def issue_session(
+    db: AsyncSession, user: User, ttl: int, *, expected_password_hash: str | None = None
+) -> tuple[str, Session]:
+    # Coordinate login issuance with revocation; a login after revocation is a new session.
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    await db.refresh(user)
+    if expected_password_hash is not None and not compare_digest(
+        user.password_hash, expected_password_hash
+    ):
+        raise ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
+    if user.role not in {role.value for role in Role}:
+        raise ApiError(403, "FORBIDDEN", "Invalid account role.")
     token, digest, expiry = SessionManager(ttl).issue(user.id, user.organization_id)
     session = Session(
         user_id=user.id,

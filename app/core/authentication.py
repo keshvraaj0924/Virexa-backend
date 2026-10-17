@@ -47,6 +47,12 @@ class AuthenticationService:
         return user, session
 
     async def revoke(self, db: AsyncSession, token: str) -> bool:
+        owner_id = await db.scalar(
+            select(Session.user_id).where(Session.token_digest == session_token_digest(token))
+        )
+        if owner_id is None:
+            return False
+        await db.execute(select(User.id).where(User.id == owner_id).with_for_update())
         result = await db.execute(
             update(Session)
             .where(
