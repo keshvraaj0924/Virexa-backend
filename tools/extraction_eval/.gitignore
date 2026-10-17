@@ -1,0 +1,17 @@
+.venv/
+.cache/
+__pycache__/
+*.pdf
+*.PDF
+*.png
+results/
+fixtures/private/
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.tsv
+*.xml
+*.json
+private/
+outputs/
