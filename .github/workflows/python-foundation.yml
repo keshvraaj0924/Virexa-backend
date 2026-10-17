@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - run: python -m ruff check app tests/test_fastapi_auth.py tests/test_document_intake.py tests/test_session_controls.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py alembic/versions/0004_document_quarantine.py
+      - run: python -m ruff check app tests/test_fastapi_auth.py tests/test_document_intake.py tests/test_session_controls.py tests/test_document_pagination.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py alembic/versions/0004_document_quarantine.py
       - run: python -m pytest -q
       - run: python -m alembic upgrade head
       - name: PostgreSQL auth and isolation tests
