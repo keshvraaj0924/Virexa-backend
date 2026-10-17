@@ -1,8 +1,5 @@
 """Tenant-scoped metadata and quarantine intake; no extraction worker is claimed."""
 
-import base64
-import binascii
-import json
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID
@@ -20,6 +17,7 @@ from app.core.rbac import Permission, Role
 from app.db.base import get_db_session
 from app.db.models import Organization
 from app.domain.documents.models import Document, Upload
+from app.domain.documents.pagination import decode_document_cursor, encode_document_cursor
 from app.domain.documents.schemas import (
     ERROR_RESPONSES,
     CompletedUpload,
@@ -31,6 +29,7 @@ from app.domain.documents.schemas import (
     ListQuery,
     Success,
 )
+from app.domain.documents.storage import QuarantineStorage
 
 router = APIRouter(prefix="/documents", tags=["documents"], responses=ERROR_RESPONSES)
 Read = Annotated[AuthContext, Depends(require_permission(Permission.DOCUMENT_READ))]
@@ -39,15 +38,15 @@ DB = Annotated[AsyncSession, Depends(get_db_session)]
 Key = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)]
 
 
-def now():
+def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def aware(value):
+def aware(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def origin(request: Request):
+def origin(request: Request) -> None:
     if request.headers.get("origin") not in request.app.state.settings.origins:
         raise ApiError(403, "UNTRUSTED_ORIGIN", "Request origin is not trusted.")
 
@@ -67,14 +66,14 @@ async def upload_slot(request: Request):
         limiter.release()
 
 
-def storage(request: Request):
+def storage(request: Request) -> QuarantineStorage:
     value = request.app.state.quarantine_storage
     if value is None:
         raise ApiError(503, "STORAGE_UNAVAILABLE", "Private upload storage is not configured.")
     return value
 
 
-def public_document(row):
+def public_document(row: Document) -> dict[str, object]:
     return {
         "id": row.id,
         "organizationId": row.organization_id,
@@ -94,7 +93,7 @@ def public_document(row):
     }
 
 
-def public_attempt(row):
+def public_attempt(row: Upload) -> dict[str, object]:
     return {
         "id": row.id,
         "documentId": row.document_id,
@@ -106,7 +105,9 @@ def public_attempt(row):
     }
 
 
-async def document(db, context, document_id, lock=False):
+async def document(
+    db: AsyncSession, context: AuthContext, document_id: UUID, lock: bool = False
+) -> Document:
     query = select(Document).where(
         Document.id == document_id, Document.organization_id == context.organization_id
     )
@@ -116,7 +117,9 @@ async def document(db, context, document_id, lock=False):
     return row
 
 
-async def attempt(db, context, document_id, attempt_id):
+async def attempt(
+    db: AsyncSession, context: AuthContext, document_id: UUID, attempt_id: UUID
+) -> Upload:
     row = await db.scalar(
         select(Upload)
         .where(
@@ -204,24 +207,13 @@ async def listing(request: Request, context: Read, db: DB, query: Annotated[List
     if query.status:
         statement = statement.where(Document.status == query.status)
     if query.cursor:
-        try:
-            decoded = json.loads(base64.b64decode(query.cursor, altchars=b"-_", validate=True))
-            if not isinstance(decoded, list) or len(decoded) != 4:
-                raise ValueError()
-            tenant, status, timestamp, identity = decoded
-            stamp, identity = datetime.fromisoformat(timestamp), UUID(identity)
-            if (
-                tenant != str(context.organization_id)
-                or status != query.status
-                or stamp.tzinfo is None
-            ):
-                raise ValueError()
-        except (ValueError, TypeError, binascii.Error):
-            raise ApiError(400, "INVALID_CURSOR", "Document cursor is invalid.") from None
+        received_at, document_id = decode_document_cursor(
+            query.cursor, organization_id=context.organization_id, status=query.status
+        )
         statement = statement.where(
             or_(
-                Document.received_at < stamp,
-                and_(Document.received_at == stamp, Document.id < identity),
+                Document.received_at < received_at,
+                and_(Document.received_at == received_at, Document.id < document_id),
             )
         )
     rows = list(
@@ -235,17 +227,12 @@ async def listing(request: Request, context: Read, db: DB, query: Annotated[List
     if len(rows) > query.limit:
         rows = rows[: query.limit]
         tail = rows[-1]
-        cursor = base64.urlsafe_b64encode(
-            json.dumps(
-                [
-                    str(context.organization_id),
-                    query.status,
-                    aware(tail.received_at).isoformat(),
-                    str(tail.id),
-                ],
-                separators=(",", ":"),
-            ).encode()
-        ).decode()
+        cursor = encode_document_cursor(
+            organization_id=context.organization_id,
+            status=query.status,
+            received_at=aware(tail.received_at),
+            document_id=tail.id,
+        )
     return success_response(
         request, {"items": [public_document(row) for row in rows], "nextCursor": cursor}
     )
