@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
     database_url: str
+    document_storage_root: str | None = None
+    public_api_origin: str = "http://localhost:3000"
     redis_url: str = "redis://localhost:6379/0"
     session_cookie_name: str = "virexa_session"
     session_ttl_seconds: int = Field(default=60 * 60 * 8, ge=60, le=86400)
@@ -26,6 +28,8 @@ class Settings(BaseSettings):
             not origin.startswith("https://") for origin in self.origins
         ):
             raise ValueError("Production origins require HTTPS")
+        if self.document_storage_root and self.public_api_origin not in self.origins:
+            raise ValueError("Session-bound upload origin must match a trusted frontend origin")
         return self
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

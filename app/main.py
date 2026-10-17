@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from time import monotonic
 from uuid import UUID, uuid4
 
+import anyio
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,8 @@ from app.db.models import Organization
 from app.domain.auth.permissions import WIRE_ROLE_PERMISSIONS
 from app.domain.auth.schemas import LoginRequest, RegisterRequest
 from app.domain.auth.service import issue_session, register, session_payload
+from app.domain.documents.routes import router as documents_router
+from app.domain.documents.storage import QuarantineStorage
 
 logger = logging.getLogger(__name__)
 
@@ -65,20 +68,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    app.state.quarantine_storage = (
+        QuarantineStorage(settings.document_storage_root)
+        if settings.document_storage_root
+        else None
+    )
+    app.state.upload_slots = anyio.CapacityLimiter(4)
+    app.state.upload_timeout_seconds = 65
+    app.include_router(documents_router, prefix=settings.api_prefix)
     limiter = AuthRateLimiter()
     authentication = AuthenticationService()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Request-ID"],
+        allow_methods=["GET", "POST", "PUT"],
+        allow_headers=["Content-Type", "X-Request-ID", "Idempotency-Key"],
         expose_headers=["Retry-After", "X-Request-ID"],
     )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         request.state.request_id = str(uuid4())
+        if request.url.path.startswith(settings.api_prefix + "/documents") and request.method in {
+            "POST",
+            "PATCH",
+        }:
+            body = bytearray()
+            try:
+                with anyio.fail_after(10):
+                    async for chunk in request.stream():
+                        if len(body) + len(chunk) > 32768:
+                            return JSONResponse(
+                                error_response(
+                                    request,
+                                    "REQUEST_TOO_LARGE",
+                                    "Document metadata is limited to 32 KiB.",
+                                ),
+                                status_code=413,
+                                headers={
+                                    "Cache-Control": "private, no-store",
+                                    "X-Request-ID": request.state.request_id,
+                                },
+                            )
+                        body.extend(chunk)
+            except TimeoutError:
+                return JSONResponse(
+                    error_response(
+                        request, "REQUEST_TIMEOUT", "Document metadata request timed out."
+                    ),
+                    status_code=408,
+                    headers={
+                        "Cache-Control": "private, no-store",
+                        "X-Request-ID": request.state.request_id,
+                    },
+                )
+            request._body = bytes(body)
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["X-Content-Type-Options"] = "nosniff"

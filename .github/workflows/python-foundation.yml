@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['app/**', 'tests/*.py', 'alembic/**', 'alembic.ini', 'pyproject.toml', '.github/workflows/python-foundation.yml']
   push:
-    branches: ['feat/fastapi-tenant-auth']
+    branches: ['feat/fastapi-tenant-auth', 'feat/tenant-document-quarantine']
 permissions:
   contents: read
 jobs:
@@ -32,10 +32,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - run: python -m ruff check app tests/test_fastapi_auth.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py
+      - run: python -m ruff check app tests/test_fastapi_auth.py tests/test_document_intake.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py alembic/versions/0004_document_quarantine.py
       - run: python -m pytest -q
       - run: python -m alembic upgrade head
       - name: PostgreSQL auth and isolation tests
         run: python -m pytest -q tests/test_fastapi_auth.py
         env:
           TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL document intake and tenant isolation
+        run: python -m pytest -q tests/test_document_intake.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
