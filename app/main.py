@@ -27,6 +27,7 @@ from app.db.models import Organization
 from app.domain.auth.permissions import WIRE_ROLE_PERMISSIONS
 from app.domain.auth.schemas import LoginRequest, RegisterRequest
 from app.domain.auth.service import issue_session, register, session_payload
+from app.domain.auth.sessions import router as sessions_router
 from app.domain.documents.routes import router as documents_router
 from app.domain.documents.storage import QuarantineStorage
 
@@ -76,13 +77,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.upload_slots = anyio.CapacityLimiter(4)
     app.state.upload_timeout_seconds = 65
     app.include_router(documents_router, prefix=settings.api_prefix)
+    app.include_router(sessions_router, prefix=settings.api_prefix)
     limiter = AuthRateLimiter()
     authentication = AuthenticationService()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type", "X-Request-ID", "Idempotency-Key"],
         expose_headers=["Retry-After", "X-Request-ID"],
     )
@@ -227,8 +229,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
         if user.role not in {role.value for role in Role}:
             raise ApiError(403, "FORBIDDEN", "Invalid account role.")
+        token, session = await issue_session(
+            db, user, settings.session_ttl_seconds, expected_password_hash=user.password_hash
+        )
         organization = await db.get(Organization, user.organization_id)
-        token, session = await issue_session(db, user, settings.session_ttl_seconds)
         await db.commit()
         set_cookie(response, token)
         return success_response(request, session_payload(user, organization, session))
