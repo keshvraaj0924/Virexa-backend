@@ -4,3 +4,7 @@ __pycache__/
 .ruff_cache/
 .env
 *.db
+
+node_modules/
+dist/
+*.egg-info/

@@ -56,3 +56,7 @@ This is not production-ready or a Fastify cutover. Production adoption needs rev
 ## Frontend deployment topology
 
 Next.js server-side session checks need the session cookie on the frontend host. Deploy behind a same-host reverse proxy (for example the frontend and `/api/v1` under one HTTPS hostname). The cookie is deliberately host-only; unrelated `app.example` and `api.example` hosts will otherwise cause SSR login loops. Localhost on different ports shares the cookie hostname and can be used for local development. The frontend's full protected dashboard still depends on Fastify routes outside this candidate; do not switch it wholesale to this auth-only API.
+
+## Legacy CI consolidation
+
+The initial exact-head Python run passed 32 tests plus 19 PostgreSQL HTTP/security cases and real Alembic upgrades. Reviewing the inherited Node job exposed 11 integration failures despite its green status: its gate checked continue-on-error conclusions rather than original outcomes. The follow-up reuses the reviewed changes from draft PR #67 (head 39ebdece35288d028b196dd086c9dfc9b9601476): all SQL migrations, native Vitest/Node test selection, outcome-based gate, rate-limit envelope handling, and corrected extraction RBAC fixtures with explicit operator-denial tests. Node checkout is additionally pinned to the exact PR head. PR #67 itself is unchanged.
