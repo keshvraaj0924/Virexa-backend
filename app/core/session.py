@@ -21,5 +21,7 @@ class SessionManager:
     @staticmethod
     def is_active(expires_at: datetime, revoked_at: datetime | None) -> bool:
         now = datetime.now(timezone.utc)
-        normalized_expiry = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+        normalized_expiry = (
+            expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+        )
         return revoked_at is None and normalized_expiry > now
