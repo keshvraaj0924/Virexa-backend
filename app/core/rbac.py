@@ -25,11 +25,42 @@ class Permission(StrEnum):
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.PLATFORM_ADMIN: frozenset(Permission),
-    Role.TENANT_ADMIN: frozenset({p for p in Permission if p != Permission.AUDIT_READ}) | {Permission.AUDIT_READ},
-    Role.ORGANIZATION_ADMIN: frozenset({Permission.DASHBOARD_READ, Permission.USER_READ, Permission.USER_MANAGE, Permission.ROLE_MANAGE, Permission.WORKFLOW_READ, Permission.WORKFLOW_MANAGE, Permission.DOCUMENT_READ, Permission.DOCUMENT_MANAGE}),
-    Role.MANAGER: frozenset({Permission.DASHBOARD_READ, Permission.USER_READ, Permission.WORKFLOW_READ, Permission.WORKFLOW_MANAGE, Permission.DOCUMENT_READ, Permission.DOCUMENT_MANAGE}),
-    Role.OPERATOR: frozenset({Permission.DASHBOARD_READ, Permission.WORKFLOW_READ, Permission.WORKFLOW_MANAGE, Permission.DOCUMENT_READ, Permission.DOCUMENT_MANAGE}),
-    Role.VIEWER: frozenset({Permission.DASHBOARD_READ, Permission.WORKFLOW_READ, Permission.DOCUMENT_READ}),
+    Role.TENANT_ADMIN: frozenset({p for p in Permission if p != Permission.AUDIT_READ})
+    | {Permission.AUDIT_READ},
+    Role.ORGANIZATION_ADMIN: frozenset(
+        {
+            Permission.DASHBOARD_READ,
+            Permission.USER_READ,
+            Permission.USER_MANAGE,
+            Permission.ROLE_MANAGE,
+            Permission.WORKFLOW_READ,
+            Permission.WORKFLOW_MANAGE,
+            Permission.DOCUMENT_READ,
+            Permission.DOCUMENT_MANAGE,
+        }
+    ),
+    Role.MANAGER: frozenset(
+        {
+            Permission.DASHBOARD_READ,
+            Permission.USER_READ,
+            Permission.WORKFLOW_READ,
+            Permission.WORKFLOW_MANAGE,
+            Permission.DOCUMENT_READ,
+            Permission.DOCUMENT_MANAGE,
+        }
+    ),
+    Role.OPERATOR: frozenset(
+        {
+            Permission.DASHBOARD_READ,
+            Permission.WORKFLOW_READ,
+            Permission.WORKFLOW_MANAGE,
+            Permission.DOCUMENT_READ,
+            Permission.DOCUMENT_MANAGE,
+        }
+    ),
+    Role.VIEWER: frozenset(
+        {Permission.DASHBOARD_READ, Permission.WORKFLOW_READ, Permission.DOCUMENT_READ}
+    ),
     Role.AUDITOR: frozenset({Permission.DASHBOARD_READ, Permission.AUDIT_READ}),
 }
 
