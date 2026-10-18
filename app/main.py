@@ -35,6 +35,7 @@ from app.domain.auth.sessions import router as sessions_router
 from app.domain.documents.routes import router as documents_router
 from app.domain.documents.storage import QuarantineStorage
 from app.domain.usage.routes import router as usage_router
+from app.domain.workflows.routes import router as workflows_router
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(sessions_router, prefix=settings.api_prefix)
     app.include_router(usage_router, prefix=settings.api_prefix)
     app.include_router(audit_router, prefix=settings.api_prefix)
+    app.include_router(workflows_router, prefix=settings.api_prefix)
     limiter = AuthRateLimiter()
     authentication = AuthenticationService()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "X-Request-ID", "Idempotency-Key"],
         expose_headers=["Retry-After", "X-Request-ID"],
     )
@@ -108,10 +110,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         request.state.request_id = str(uuid4())
-        if request.url.path.startswith(settings.api_prefix + "/documents") and request.method in {
-            "POST",
-            "PATCH",
-        }:
+        if request.url.path.startswith(
+            (settings.api_prefix + "/documents", settings.api_prefix + "/workflows")
+        ) and request.method in {"POST", "PATCH"}:
             body = bytearray()
             try:
                 with anyio.fail_after(10):
@@ -121,7 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 error_response(
                                     request,
                                     "REQUEST_TOO_LARGE",
-                                    "Document metadata is limited to 32 KiB.",
+                                    "Request metadata is limited to 32 KiB.",
                                 ),
                                 status_code=413,
                                 headers={
@@ -133,7 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except TimeoutError:
                 return JSONResponse(
                     error_response(
-                        request, "REQUEST_TIMEOUT", "Document metadata request timed out."
+                        request, "REQUEST_TIMEOUT", "Metadata request timed out."
                     ),
                     status_code=408,
                     headers={

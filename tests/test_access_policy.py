@@ -23,11 +23,11 @@ def test_capability_matrix_matches_decisions(role):
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.AUDITOR}:
         expected |= {"usage:organization:read", "audit:read"}
     if role != Role.AUDITOR:
-        expected.add("document:read")
+        expected |= {"document:read", "workflow:read"}
     if role not in {Role.AUDITOR, Role.VIEWER}:
-        expected |= {"document:create", "document:upload"}
+        expected |= {"document:create", "document:upload", "workflow:create"}
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.MANAGER}:
-        expected.add("organization:read")
+        expected |= {"organization:read", "workflow:manage"}
     assert capabilities(subject) == sorted(expected)
     for action in Action:
         allowed = action.value in expected or (
