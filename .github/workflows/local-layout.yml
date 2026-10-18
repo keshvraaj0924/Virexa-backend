@@ -1,0 +1,31 @@
+name: Isolated local layout engine
+on:
+  pull_request:
+    paths: ['app/domain/documents/layout*', 'tools/extraction_eval/**', 'tests/test_layout*', '.github/workflows/local-layout.yml']
+permissions:
+  contents: read
+jobs:
+  genuine-isolated-docling:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned official CPU runtime
+        run: |
+          python -m pip install -r tools/extraction_eval/requirements-docling-lock.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[dev]'
+          sudo apt-get update
+          sudo apt-get install -y libseccomp2
+      - name: Provision exact reviewed public models, before any document is parsed
+        run: python tools/extraction_eval/provision_layout_assets.py --output "$RUNNER_TEMP/layout-models"
+      - name: Required isolated genuine Docling smoke on synthetic PDF only
+        env:
+          VIREXA_LAYOUT_SMOKE_ASSETS: ${{ runner.temp }}/layout-models
+        run: python -m pytest -q tests/test_layout_smoke.py
+      - name: Adapter protocol, resource, filesystem and network isolation regressions
+        run: python -m pytest -q tests/test_layout_adapter.py

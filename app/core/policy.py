@@ -37,6 +37,7 @@ class Action(StrEnum):
     AUDIT_READ = "audit:read"
     USAGE_READ = "usage:read"
     USAGE_ORGANIZATION_READ = "usage:organization:read"
+    LAYOUT_REQUEST = "document:layout:request"
     DOCUMENT_READ = "document:read"
     DOCUMENT_CREATE = "document:create"
     DOCUMENT_UPLOAD = "document:upload"
@@ -106,11 +107,12 @@ def role_allows(subject: Subject, action: Action) -> bool:
         Action.DOCUMENT_UPLOAD: Permission.DOCUMENT_MANAGE,
         Action.ORGANIZATION_READ: Permission.USER_READ,
         Action.EXTRACTION_REQUEST: Permission.DOCUMENT_MANAGE,
+        Action.LAYOUT_REQUEST: Permission.DOCUMENT_MANAGE,
     }.get(action)
     return bool(
         required
         and has_permission(subject.role, required)
-        and not (action == Action.EXTRACTION_REQUEST and subject.role == Role.OPERATOR)
+        and not (action in {Action.EXTRACTION_REQUEST, Action.LAYOUT_REQUEST} and subject.role == Role.OPERATOR)
     )
 
 
@@ -138,7 +140,7 @@ def require_document(subject: Subject, action: Action, resource: DocumentAttribu
         if resource.status == "received" and resource.scan_status == "awaiting_upload":
             return
         raise PolicyDenied(409, "DOCUMENT_NOT_WRITABLE", "Document is no longer accepting uploads.")
-    if action == Action.EXTRACTION_REQUEST:
+    if action in {Action.EXTRACTION_REQUEST, Action.LAYOUT_REQUEST}:
         if resource.scan_status == "clean":
             return
         raise PolicyDenied(
