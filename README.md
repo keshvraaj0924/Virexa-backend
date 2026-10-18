@@ -1,3 +1,5 @@
+> Start here: [paired Python candidate developer guide](docs/DEVELOPER_GUIDE.md) for current local setup, exact runtime pins, capabilities and test commands. Older sections below record earlier milestones; use the guide for the current candidate.
+
 > Python workflow milestone: [workflow tracking records](docs/PYTHON_WORKFLOW_RECORDS.md) ports tenant-scoped metadata CRUD, idempotency and version conflicts. It does not execute workflows or integrations.
 
 > Python audit milestone: [tenant audit trail](docs/audit-trail.md) covers supported forward-only events and a paginated tenant-only read API. It is not a complete historical/compliance log.
