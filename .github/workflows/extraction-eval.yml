@@ -1,0 +1,26 @@
+name: Extraction evaluation tools
+
+on:
+  pull_request:
+    paths:
+      - 'tools/extraction_eval/**'
+      - '.github/workflows/extraction-eval.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run dependency-free synthetic regression tests
+        run: python -S -m unittest discover -s tools/extraction_eval -p 'test_*.py' -v
+      - name: Compile evaluation tools
+        run: python -m compileall -q tools/extraction_eval

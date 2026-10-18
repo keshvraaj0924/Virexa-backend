@@ -1,0 +1,81 @@
+name: Python auth foundation
+on:
+  pull_request:
+    paths: ['app/**', 'tests/*.py', 'alembic/**', 'alembic.ini', 'pyproject.toml', '.github/workflows/python-foundation.yml']
+  push:
+    branches: ['feat/fastapi-tenant-auth', 'feat/tenant-document-quarantine', 'feat/python-session-controls', 'feat/python-access-policies', 'feat/usage-entitlements', 'feat/verified-dual-signup', 'feat/tenant-audit-trail', 'feat/python-workflow-records']
+permissions:
+  contents: read
+jobs:
+  auth-security:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: virexa_test
+          POSTGRES_PASSWORD: isolated-ci-only
+          POSTGRES_DB: virexa_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m ruff check app tests/test_fastapi_auth.py tests/test_document_intake.py tests/test_session_controls.py tests/test_document_pagination.py tests/test_access_policy.py tests/test_access_policy_http.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py alembic/versions/0004_document_quarantine.py alembic/versions/0005_usage_ledger.py tests/test_usage.py alembic/versions/0006_verified_signup.py tests/test_verified_signup.py tools/synthetic_signup_smtp.py tests/test_audit.py alembic/versions/0007_audit_events.py tests/test_workflows.py alembic/versions/0008_workflow_records.py tests/test_organization_members.py alembic/versions/0009_member_versions.py
+      - run: python -m pytest -q
+      - run: python -m alembic upgrade head
+      - run: python -m alembic check
+      - name: PostgreSQL usage ledger and concurrent quota transitions
+        run: python -m pytest -q tests/test_usage.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL auth and isolation tests
+        run: python -m pytest -q tests/test_fastapi_auth.py
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL document intake and tenant isolation
+        run: python -m pytest -q tests/test_document_intake.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL session inventory and concurrent revocation
+        run: python -m pytest -q tests/test_session_controls.py
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL access policy decision and HTTP regressions
+        run: python -m pytest -q tests/test_access_policy.py tests/test_access_policy_http.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL verified signup races and account-kind isolation
+        run: python -m pytest -q tests/test_verified_signup.py
+        env:
+          SIGNUP_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+      - name: PostgreSQL tenant audit trail and transaction rollback
+        run: python -m pytest -q tests/test_audit.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+
+      - name: PostgreSQL workflow record races and audit atomicity
+        run: python -m pytest -q tests/test_workflows.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+
+      - name: PostgreSQL organization member concurrency and tenant isolation
+        run: python -m pytest -q tests/test_organization_members.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+
+      - name: PostgreSQL scan leases, concurrent admission, and tenant isolation
+        run: python -m pytest -q tests/test_document_scanning.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test

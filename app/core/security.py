@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
+from datetime import datetime, timedelta, timezone
 
 from pwdlib import PasswordHash
-
 
 _password_hash = PasswordHash.recommended()
 

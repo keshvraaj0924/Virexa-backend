@@ -28,7 +28,7 @@ const extraction: DocumentExtraction = {
   completedAt: null,
 }
 
-function authRepository(role: 'operator' | 'viewer' = 'operator'): AuthRepository {
+function authRepository(role: 'manager' | 'operator' | 'viewer' = 'manager'): AuthRepository {
   return {
     register: vi.fn(), login: vi.fn(), listActiveSessions: vi.fn(), revokeSession: vi.fn(),
     revokeOwnedSession: vi.fn(), revokeOtherSessions: vi.fn(), ping: vi.fn(),
@@ -39,13 +39,15 @@ function authRepository(role: 'operator' | 'viewer' = 'operator'): AuthRepositor
   } as AuthRepository
 }
 
-async function build(role: 'operator' | 'viewer' = 'operator') {
+async function build(role: 'manager' | 'operator' | 'viewer' = 'manager') {
   const app = Fastify()
   await app.register(cookie)
   const list = vi.fn(async () => ({ items: [extraction], nextCursor: null }))
   const createOrReplay = vi.fn(async () => extraction)
+  const review = vi.fn(async () => extraction)
+  const complete = vi.fn(async () => extraction)
   const record = vi.fn(async () => undefined)
-  const extractionRepository = { list, createOrReplay } as unknown as DocumentExtractionRepository
+  const extractionRepository = { list, createOrReplay, review, complete } as unknown as DocumentExtractionRepository
   const auditService = { record } as unknown as AuditService
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AuthenticationRequiredError) return reply.code(401).send(apiFailure('UNAUTHENTICATED', error.message, request.id))
@@ -54,7 +56,7 @@ async function build(role: 'operator' | 'viewer' = 'operator') {
     throw error
   })
   await registerExtractionRoutes(app, { authRepository: authRepository(role), auditService, extractionRepository })
-  return { app, list, createOrReplay, record }
+  return { app, list, createOrReplay, review, complete, record }
 }
 
 afterEach(() => { delete process.env.FRONTEND_ORIGIN })
@@ -106,6 +108,30 @@ describe('extraction HTTP boundary', () => {
     expect(response.statusCode).toBe(403)
     expect(createOrReplay).not.toHaveBeenCalled()
     await app.close()
+  })
+
+  it.each([
+    { action: 'creation', method: 'POST' as const, url: `/api/v1/documents/${documentId}/extractions` },
+    { action: 'review', method: 'PATCH' as const, url: `/api/v1/documents/${documentId}/extractions/${extractionId}/review` },
+    { action: 'completion', method: 'POST' as const, url: `/api/v1/documents/${documentId}/extractions/${extractionId}/complete` },
+  ])('denies operator extraction $action before persistence or audit', async ({ method, url }) => {
+    process.env.FRONTEND_ORIGIN = trustedOrigin
+    const { app, createOrReplay, review, complete, record } = await build('operator')
+    try {
+      const response = await app.inject({
+        method, url,
+        headers: { cookie: 'virexa_session=valid-token', origin: trustedOrigin, 'idempotency-key': 'extract-operator' },
+        payload: { schemaVersion: 'invoice-v1' },
+      })
+      expect(response.statusCode).toBe(403)
+      expect(response.json().error.code).toBe('FORBIDDEN')
+      expect(createOrReplay).not.toHaveBeenCalled()
+      expect(review).not.toHaveBeenCalled()
+      expect(complete).not.toHaveBeenCalled()
+      expect(record).not.toHaveBeenCalled()
+    } finally {
+      await app.close()
+    }
   })
 
   it('creates in session tenant with idempotency and records an audit event', async () => {

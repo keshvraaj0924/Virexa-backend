@@ -1,13 +1,23 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    display_name: str = Field(min_length=2, max_length=120)
+    display_name: str = Field(alias="displayName", min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
-    organization_name: str = Field(min_length=2, max_length=160)
+    organization_name: str = Field(alias="organizationName", min_length=2, max_length=160)
+
+    @field_validator("display_name", "organization_name")
+    @classmethod
+    def strip_names(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Name must contain at least two characters")
+        return value
 
     @field_validator("password")
     @classmethod
@@ -18,6 +28,9 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    account_type: Literal["individual", "organization"] | None = Field(
+        default=None, alias="accountType"
+    )
     model_config = ConfigDict(extra="forbid")
 
     email: EmailStr
