@@ -82,3 +82,9 @@ Returns the authenticated user's session and organization context. The response 
 Invalidates the active server-side session.
 
 All successful responses use `{ "data": ..., "meta": { "requestId": ..., "timestamp": ... } }`. Errors use `{ "error": { "code": ..., "message": ..., "requestId": ..., "fieldErrors": ... }, "meta": ... }`.
+
+### Optional Python private document scanning
+
+See [local document scanning](docs/local-document-scanning.md) for the disabled-by-default
+ClamAV Unix-socket worker, durable leases, tests, and explicit operator prerequisites.
+Scanning does not enable extraction or public downloads.

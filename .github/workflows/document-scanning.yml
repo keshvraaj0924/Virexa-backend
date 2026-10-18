@@ -1,0 +1,56 @@
+name: Local document malware scanning
+on:
+  pull_request:
+    paths: ['app/domain/documents/**', 'tests/test_document_scanning.py', '.github/workflows/document-scanning.yml']
+permissions:
+  contents: read
+jobs:
+  clamav-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Install official distribution engine and current signature database
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav-daemon clamav-freshclam
+          sudo systemctl stop clamav-freshclam clamav-daemon clamav-daemon.socket || true
+          sudo freshclam
+          clamd --version
+      - name: Run isolated Unix-socket engine against synthetic fixtures only
+        shell: bash
+        run: |
+          set -euo pipefail
+          scan_dir=$(mktemp -d)
+          chmod 700 "$scan_dir"
+          cat > "$scan_dir/clamd.conf" <<EOF
+          Foreground yes
+          LocalSocket $scan_dir/clamd.sock
+          LocalSocketMode 600
+          DatabaseDirectory /var/lib/clamav
+          StreamMaxLength 25M
+          MaxFileSize 25M
+          MaxScanSize 100M
+          MaxScanTime 20000
+          MaxThreads 4
+          AlertExceedsMax yes
+          AlertEncrypted yes
+          LogClean no
+          LogVerbose no
+          EOF
+          TZ=UTC clamd --config-file="$scan_dir/clamd.conf" > "$scan_dir/daemon.log" 2>&1 &
+          daemon_pid=$!
+          trap 'kill "$daemon_pid" 2>/dev/null || true; rm -rf "$scan_dir"' EXIT
+          for attempt in $(seq 1 90); do
+            test -S "$scan_dir/clamd.sock" && break
+            kill -0 "$daemon_pid" || { echo 'ClamAV startup failed'; exit 1; }
+            sleep 1
+          done
+          test -S "$scan_dir/clamd.sock"
+          CLAMAV_TEST_SOCKET="$scan_dir/clamd.sock" python -m pytest -q tests/test_document_scanning.py

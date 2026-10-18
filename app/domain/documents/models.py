@@ -68,3 +68,31 @@ class Upload(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScanJob(Base):
+    __tablename__ = "document_scan_jobs"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_scan_document"),
+        ForeignKeyConstraint(["document_id", "organization_id"],
+                             ["documents.id", "documents.organization_id"]),
+        ForeignKeyConstraint(["actor_user_id", "organization_id"],
+                             ["users.id", "users.organization_id"]),
+        CheckConstraint("state IN ('pending','running','clean','rejected','error')",
+                        name="ck_scan_job_state"),
+        CheckConstraint("attempts >= 0 AND attempts <= 3", name="ck_scan_job_attempts"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    document_id: Mapped[UUID] = mapped_column()
+    upload_id: Mapped[UUID] = mapped_column(ForeignKey("document_uploads.id"))
+    actor_user_id: Mapped[UUID] = mapped_column()
+    checksum_sha256: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    lease_token: Mapped[UUID | None] = mapped_column()
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    result_code: Mapped[str | None] = mapped_column(String(40))

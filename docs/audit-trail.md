@@ -14,6 +14,7 @@ The Python candidate now writes forward-only, durable `audit_events` for actual 
 - `auth.session.revoked`: one event per session actually revoked, including revoke-others
 - `document.created`: metadata persisted
 - `document.intake.completed`: first verified quarantine completion, atomically with usage settlement
+- `document.scan.clean`, `document.scan.rejected`, `document.scan.error`: internal worker verdict/retry outcomes, attributed to the initiating upload actor; no raw engine signature or content
 - `document.intake.failed`: authenticated document mutation returning a handled application error, excluding extraction requests
 - `access.denied`: authenticated API 403/404 errors after a valid database-backed subject was resolved
 

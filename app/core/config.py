@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/api/v1"
     database_url: str
+    document_scanner_socket: str | None = None
     document_storage_root: str | None = None
     public_api_origin: str = "http://localhost:3000"
     redis_url: str = "redis://localhost:6379/0"

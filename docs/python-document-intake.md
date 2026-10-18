@@ -29,13 +29,16 @@ operators, matching the existing Node route boundary.
 - POST `/documents/{id}/uploads/{attemptId}/complete`: rechecks actual stored size,
   digest and signature; returns completed transport receipt, idempotently.
 - POST `/documents/{id}/extractions`: returns DOCUMENT_NOT_READY until clean scan,
-  then EXTRACTOR_UNAVAILABLE. No scanner or extractor is configured or simulated.
+  then EXTRACTOR_UNAVAILABLE. Scanning remains disabled until explicitly configured;
+  no extractor is configured or simulated.
   Extraction list returns unavailable until persistence exists, not invented jobs.
 
-`scanStatus` is an additive response field: awaiting_upload -> pending_scan.
+`scanStatus` is an additive response field: awaiting_upload -> pending_scan ->
+clean/rejected, only through the optional internal local scanner.
 Document status stays `received`. Upload `completed` means only verified transport;
 it cannot imply safe content, successful extraction, validated fields or workflow
-eligibility. Only a future trusted scanner may promote to clean/rejected. No API
+eligibility. See [local scanning](local-document-scanning.md) for the leased worker,
+configuration prerequisites, failure behavior, and limitations. No API
 accepts caller-supplied scan/result/status values.
 
 ## Local opt-in configuration
