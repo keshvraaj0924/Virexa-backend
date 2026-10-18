@@ -53,3 +53,5 @@ Production requires separate reviewed data/schema cutover, dependency locking,
 HTTPS/cookie/proxy review, durable email, distributed limits, storage operations
 and deployment decisions. Offline extraction evaluation does not enable an OCR
 pipeline; optional PyMuPDF license review remains a prerequisite to product use.
+
+Human layout review API and safety boundary: [human-review.md](docs/human-review.md).

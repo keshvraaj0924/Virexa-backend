@@ -5,6 +5,7 @@ policy. Unported endpoints remain unavailable.
 """
 
 WIRE_ROLE_PERMISSIONS: dict[str, list[str]] = {
+    "reviewer": ["document:read"],  # Python-only review capability comes from /me/permissions.
     "auditor": [],  # No implemented Node-compatible permissions; see /me/permissions.
     "super_admin": [
         "platform:read",

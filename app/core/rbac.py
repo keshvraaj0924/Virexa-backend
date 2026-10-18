@@ -9,6 +9,7 @@ class Role(StrEnum):
     OPERATOR = "operator"
     VIEWER = "viewer"
     AUDITOR = "auditor"
+    REVIEWER = "reviewer"
 
 
 class Permission(StrEnum):
@@ -61,6 +62,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.VIEWER: frozenset(
         {Permission.DASHBOARD_READ, Permission.WORKFLOW_READ, Permission.DOCUMENT_READ}
     ),
+    Role.REVIEWER: frozenset({Permission.DASHBOARD_READ, Permission.DOCUMENT_READ}),
     Role.AUDITOR: frozenset({Permission.DASHBOARD_READ, Permission.AUDIT_READ}),
 }
 
