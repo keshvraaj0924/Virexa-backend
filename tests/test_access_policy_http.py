@@ -86,6 +86,10 @@ BASE = "/api/v1"
     ],
 )
 async def test_effective_capabilities_use_live_database_role(app, role, expected):
+    if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.AUDITOR}:
+        expected += ["organization:members:read", "organization:hierarchy:read"]
+    if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN}:
+        expected += ["organization:members:manage"]
     expected = sorted(
         expected
         + ["usage:read"]

@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[dev]'
-      - run: python -m ruff check app tests/test_fastapi_auth.py tests/test_document_intake.py tests/test_session_controls.py tests/test_document_pagination.py tests/test_access_policy.py tests/test_access_policy_http.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py alembic/versions/0004_document_quarantine.py alembic/versions/0005_usage_ledger.py tests/test_usage.py alembic/versions/0006_verified_signup.py tests/test_verified_signup.py tools/synthetic_signup_smtp.py tests/test_audit.py alembic/versions/0007_audit_events.py tests/test_workflows.py alembic/versions/0008_workflow_records.py
+      - run: python -m ruff check app tests/test_fastapi_auth.py tests/test_document_intake.py tests/test_session_controls.py tests/test_document_pagination.py tests/test_access_policy.py tests/test_access_policy_http.py alembic/env.py alembic/versions/0003_auth_identity_boundaries.py alembic/versions/0004_document_quarantine.py alembic/versions/0005_usage_ledger.py tests/test_usage.py alembic/versions/0006_verified_signup.py tests/test_verified_signup.py tools/synthetic_signup_smtp.py tests/test_audit.py alembic/versions/0007_audit_events.py tests/test_workflows.py alembic/versions/0008_workflow_records.py tests/test_organization_members.py alembic/versions/0009_member_versions.py
       - run: python -m pytest -q
       - run: python -m alembic upgrade head
       - run: python -m alembic check
@@ -67,5 +67,10 @@ jobs:
 
       - name: PostgreSQL workflow record races and audit atomicity
         run: python -m pytest -q tests/test_workflows.py
+        env:
+          DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test
+
+      - name: PostgreSQL organization member concurrency and tenant isolation
+        run: python -m pytest -q tests/test_organization_members.py
         env:
           DOCUMENT_TEST_DATABASE_URL: postgresql+asyncpg://virexa_test:isolated-ci-only@localhost:5432/virexa_test

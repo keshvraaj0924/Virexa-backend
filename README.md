@@ -1,3 +1,5 @@
+> Python organization administration: [existing-member roster and role controls](docs/organization-members.md), with tenant scope, individual-account gating, and last-admin protection. No invitations or user provisioning.
+
 > Python workflow milestone: [workflow tracking records](docs/PYTHON_WORKFLOW_RECORDS.md) ports tenant-scoped metadata CRUD, idempotency and version conflicts. It does not execute workflows or integrations.
 
 > Python audit milestone: [tenant audit trail](docs/audit-trail.md) covers supported forward-only events and a paginated tenant-only read API. It is not a complete historical/compliance log.

@@ -34,6 +34,7 @@ from app.domain.auth.service import issue_session, register, session_payload
 from app.domain.auth.sessions import router as sessions_router
 from app.domain.documents.routes import router as documents_router
 from app.domain.documents.storage import QuarantineStorage
+from app.domain.organization.routes import router as organization_router
 from app.domain.usage.routes import router as usage_router
 from app.domain.workflows.routes import router as workflows_router
 
@@ -96,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(usage_router, prefix=settings.api_prefix)
     app.include_router(audit_router, prefix=settings.api_prefix)
     app.include_router(workflows_router, prefix=settings.api_prefix)
+    app.include_router(organization_router, prefix=settings.api_prefix)
     limiter = AuthRateLimiter()
     authentication = AuthenticationService()
     app.add_middleware(

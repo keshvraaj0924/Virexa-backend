@@ -1,7 +1,15 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,6 +47,7 @@ class User(Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)

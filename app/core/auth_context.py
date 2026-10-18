@@ -9,6 +9,7 @@ from app.core.authentication import AuthenticationService
 from app.core.policy import Action, require_action
 from app.core.rbac import Permission, Role, has_permission
 from app.db.base import get_db_session
+from app.db.models import Organization
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class AuthContext:
     user_id: UUID
     organization_id: UUID
     role: Role
+    account_type: str = "organization"
 
 
 _authentication = AuthenticationService()
@@ -45,7 +47,15 @@ async def get_auth_context(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid account role"
         ) from exc
 
-    context = AuthContext(user_id=user.id, organization_id=user.organization_id, role=role)
+    organization = await db.get(Organization, user.organization_id)
+    if organization is None:
+        raise HTTPException(status_code=403, detail="Invalid workspace")
+    context = AuthContext(
+        user_id=user.id,
+        organization_id=user.organization_id,
+        role=role,
+        account_type=organization.account_type,
+    )
     request.state.audit_subject = context
     return context
 
