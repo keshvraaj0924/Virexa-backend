@@ -31,6 +31,7 @@ from app.domain.auth.service import issue_session, register, session_payload
 from app.domain.auth.sessions import router as sessions_router
 from app.domain.documents.routes import router as documents_router
 from app.domain.documents.storage import QuarantineStorage
+from app.domain.usage.routes import router as usage_router
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.upload_timeout_seconds = 65
     app.include_router(documents_router, prefix=settings.api_prefix)
     app.include_router(sessions_router, prefix=settings.api_prefix)
+    app.include_router(usage_router, prefix=settings.api_prefix)
     limiter = AuthRateLimiter()
     authentication = AuthenticationService()
     app.add_middleware(

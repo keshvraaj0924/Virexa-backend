@@ -30,6 +30,7 @@ from app.domain.documents.schemas import (
     Success,
 )
 from app.domain.documents.storage import QuarantineStorage
+from app.domain.usage.service import reserve, settle
 
 router = APIRouter(prefix="/documents", tags=["documents"], responses=ERROR_RESPONSES)
 Read = Annotated[AuthContext, Depends(require_capability(Action.DOCUMENT_READ))]
@@ -383,6 +384,18 @@ async def complete(document_id: UUID, attempt_id: UUID, request: Request, contex
             503, "STORAGE_UNAVAILABLE", "Private upload storage is unavailable."
         ) from None
     if not replayed:
+        usage = await reserve(
+            db,
+            organization_id=context.organization_id,
+            user_id=context.user_id,
+            key=f"document-intake:{doc.id}",
+            operation="document_intake",
+            meter="document_uploads",
+            quantity=1,
+        )
+        await settle(
+            db, organization_id=context.organization_id, event_id=usage.id, state="succeeded"
+        )
         row.status = "completed"
         row.completed_at = row.updated_at = now()
         doc.scan_status = "pending_scan"

@@ -22,6 +22,7 @@ class Organization(Base):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
+        UniqueConstraint("id", "organization_id", name="uq_user_tenant_identity"),
         UniqueConstraint("organization_id", "email", name="uq_users_organization_email"),
         UniqueConstraint("email", name="uq_users_email"),
     )
@@ -31,7 +32,7 @@ class User(Base):
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(64), nullable=False, default="organization_admin")
     created_at: Mapped[datetime] = mapped_column(
@@ -42,6 +43,7 @@ class User(Base):
 
 class Session(Base):
     __tablename__ = "sessions"
+    __table_args__ = (UniqueConstraint("token_digest"),)
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
@@ -50,7 +52,7 @@ class Session(Base):
     organization_id: Mapped[UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    token_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )

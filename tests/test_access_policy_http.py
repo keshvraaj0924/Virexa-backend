@@ -16,6 +16,7 @@ from test_document_intake import (  # noqa: F401
     start,
 )
 
+from app.core.rbac import Role
 from app.db.models import Session, User
 from app.domain.documents.models import Document, Upload
 from app.domain.documents.routes import now
@@ -85,6 +86,16 @@ BASE = "/api/v1"
     ],
 )
 async def test_effective_capabilities_use_live_database_role(app, role, expected):
+    expected = sorted(
+        expected
+        + ["usage:read"]
+        + (
+            ["usage:organization:read"]
+            if role
+            in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.AUDITOR}
+            else []
+        )
+    )
     async with client(app) as c:
         assert (await c.get(BASE + "/me/permissions")).status_code == 401
         await signup(c)
