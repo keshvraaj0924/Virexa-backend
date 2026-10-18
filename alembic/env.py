@@ -10,6 +10,7 @@ from app.domain.audit import models as audit_models  # noqa: F401
 from app.domain.auth import signup  # noqa: F401
 from app.domain.documents import models as document_models  # noqa: F401
 from app.domain.usage import models as usage_models  # noqa: F401
+from app.domain.workflows import models as workflow_models  # noqa: F401
 
 
 def run_migrations(connection):

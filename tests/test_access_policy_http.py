@@ -89,6 +89,14 @@ async def test_effective_capabilities_use_live_database_role(app, role, expected
     expected = sorted(
         expected
         + ["usage:read"]
+        + (["workflow:read"] if role != Role.AUDITOR else [])
+        + (["workflow:create"] if role not in {Role.AUDITOR, Role.VIEWER} else [])
+        + (
+            ["workflow:manage"]
+            if role
+            in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.MANAGER}
+            else []
+        )
         + (
             ["usage:organization:read", "audit:read"]
             if role

@@ -14,6 +14,8 @@ ACTIONS = {
     "auth.login": ("session", "succeeded"),
     "auth.logout": ("session", "succeeded"),
     "auth.session.revoked": ("session", "succeeded"),
+    "workflow.created": ("workflow", "succeeded"),
+    "workflow.updated": ("workflow", "succeeded"),
     "document.created": ("document", "succeeded"),
     "document.intake.completed": ("document", "succeeded"),
     "document.intake.failed": ("document", "failed"),

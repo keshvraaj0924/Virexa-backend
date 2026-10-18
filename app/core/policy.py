@@ -25,6 +25,9 @@ class Subject(Protocol):
 
 
 class Action(StrEnum):
+    WORKFLOW_READ = "workflow:read"
+    WORKFLOW_CREATE = "workflow:create"
+    WORKFLOW_MANAGE = "workflow:manage"
     AUDIT_READ = "audit:read"
     USAGE_READ = "usage:read"
     USAGE_ORGANIZATION_READ = "usage:organization:read"
@@ -46,6 +49,13 @@ class DocumentAttributes:
 
 
 @dataclass(frozen=True)
+class WorkflowAttributes:
+    organization_id: UUID
+    owner_id: UUID
+    status: str
+
+
+@dataclass(frozen=True)
 class SessionAttributes:
     organization_id: UUID
     owner_id: UUID
@@ -59,6 +69,13 @@ class PolicyDenied(ApiError):
 def role_allows(subject: Subject, action: Action) -> bool:
     if subject.role not in set(Role):
         return False
+    if action == Action.WORKFLOW_MANAGE:
+        return subject.role in {
+            Role.PLATFORM_ADMIN,
+            Role.TENANT_ADMIN,
+            Role.ORGANIZATION_ADMIN,
+            Role.MANAGER,
+        }
     if action in {Action.AUDIT_READ, Action.USAGE_ORGANIZATION_READ}:
         return subject.role in {
             Role.PLATFORM_ADMIN,
@@ -69,6 +86,8 @@ def role_allows(subject: Subject, action: Action) -> bool:
     if action in {Action.USAGE_READ, Action.SESSION_READ, Action.SESSION_REVOKE}:
         return True
     required = {
+        Action.WORKFLOW_READ: Permission.WORKFLOW_READ,
+        Action.WORKFLOW_CREATE: Permission.WORKFLOW_MANAGE,
         Action.DOCUMENT_READ: Permission.DOCUMENT_READ,
         Action.DOCUMENT_CREATE: Permission.DOCUMENT_MANAGE,
         Action.DOCUMENT_UPLOAD: Permission.DOCUMENT_MANAGE,
@@ -125,3 +144,33 @@ def require_session(subject: Subject, action: Action, resource: SessionAttribute
         or not resource.active
     ):
         raise PolicyDenied(404, "NOT_FOUND", "Active session was not found.")
+
+
+def require_workflow(
+    subject: Subject, action: Action, resource: WorkflowAttributes, next_status: str | None = None
+) -> None:
+    require_action(subject, action)
+    if resource.organization_id != subject.organization_id:
+        raise PolicyDenied(404, "NOT_FOUND", "Workflow was not found.")
+    if action == Action.WORKFLOW_READ:
+        return
+    if action not in {Action.WORKFLOW_CREATE, Action.WORKFLOW_MANAGE}:
+        raise PolicyDenied(403, "FORBIDDEN", "Insufficient permissions.")
+    if not role_allows(subject, Action.WORKFLOW_MANAGE) and resource.owner_id != subject.user_id:
+        raise PolicyDenied(403, "FORBIDDEN", "You cannot modify this workflow.")
+    transitions = {
+        "draft": {"active"},
+        "active": {"paused", "archived"},
+        "paused": {"active", "archived"},
+        "archived": set(),
+    }
+    if (
+        next_status
+        and next_status != resource.status
+        and next_status not in transitions.get(resource.status, set())
+    ):
+        raise PolicyDenied(
+            409,
+            "INVALID_STATE_TRANSITION",
+            f"Workflow cannot transition from {resource.status} to {next_status}.",
+        )
