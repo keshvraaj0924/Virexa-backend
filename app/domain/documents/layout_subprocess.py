@@ -44,7 +44,7 @@ from layout_adapter import (  # noqa: E402
 def _landlock(assets: Path, scratch: Path) -> None:
     """Deny filesystem access outside explicit runtime/model/scratch paths.
 
-    Landlock ABI 1+ is required. Filters apply to all descendants. Never grant a
+    Landlock ABI 3+ is required to mediate truncation. Filters apply to all descendants. Never grant a
     shared quarantine directory, cwd, home directory, or application config root.
     """
 
@@ -61,7 +61,7 @@ def _landlock(assets: Path, scratch: Path) -> None:
         libc = ctypes.CDLL(None, use_errno=True)
         libc.syscall.restype = ctypes.c_long
         abi = libc.syscall(444, 0, 0, 1)  # landlock_create_ruleset VERSION
-        if abi < 1 or libc.prctl(38, 1, 0, 0, 0):
+        if abi < 3 or libc.prctl(38, 1, 0, 0, 0):
             raise RuntimeError
         handled = (1 << 13) - 1  # ABI 1 filesystem operations
         if abi >= 2:
@@ -97,7 +97,8 @@ def _landlock(assets: Path, scratch: Path) -> None:
                     continue
                 access = (1 << 2) | ((1 << 3) if path.is_dir() else 0)
                 if path == scratch:
-                    access = handled & ~(1 << 0)  # private temp, no executable launch
+                    # Private regular-file scratch only; no special files or symlinks.
+                    access = sum(1 << bit for bit in (1, 2, 3, 4, 5, 7, 8, 13, 14))
                 elif path == Path("/dev/null"):
                     access |= 1 << 1
                 path_fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
@@ -116,11 +117,14 @@ def _landlock(assets: Path, scratch: Path) -> None:
 
 
 def _restrict() -> None:
+    if os.geteuid() == 0:
+        raise LayoutError("sandbox_unavailable")
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_BYTES, MEMORY_BYTES))
     resource.setrlimit(resource.RLIMIT_CPU, (TIMEOUT_SECONDS, TIMEOUT_SECONDS))
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
+    resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
     try:
         libc = ctypes.CDLL(None, use_errno=True)
         if libc.prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
@@ -162,6 +166,12 @@ def _restrict() -> None:
             raise RuntimeError
         try:
             for name in (
+                "ptrace", "process_vm_readv", "process_vm_writev", "pidfd_open", "pidfd_getfd",
+                "pidfd_send_signal", "kill", "tkill", "process_madvise",
+                "chmod", "fchmod", "fchmodat", "fchmodat2", "chown", "fchown", "lchown",
+                "fchownat", "utime", "utimes", "futimesat", "utimensat",
+                "setxattr", "lsetxattr", "fsetxattr", "removexattr", "lremovexattr", "fremovexattr",
+                "shmget", "shmat", "shmctl", "msgget", "msgsnd", "msgrcv", "msgctl",
                 "fork",
                 "vfork",
                 "socket",
@@ -198,6 +208,14 @@ def _restrict() -> None:
             clone3 = lib.seccomp_syscall_resolve_name(b"clone3")
             if clone3 >= 0 and lib.seccomp_rule_add(context, 0x00050000 | errno.ENOSYS, clone3, 0):
                 raise RuntimeError
+            # pthread cancellation/raise may signal this process, never another service.
+            tgkill = lib.seccomp_syscall_resolve_name(b"tgkill")
+            if tgkill >= 0:
+                comparison = ArgCompare(0, 1, os.getpid(), 0)  # NE: another thread group
+                if lib.seccomp_rule_add_array(
+                    context, 0x00050000 | errno.EPERM, tgkill, 1, ctypes.byref(comparison)
+                ):
+                    raise RuntimeError
             if lib.seccomp_load(context):
                 raise RuntimeError
         finally:

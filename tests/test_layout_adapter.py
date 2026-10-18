@@ -29,7 +29,7 @@ def protocol():
         "parser_version": PARSER_VERSION,
         "model_version": MODEL_VERSION,
         "warnings": list(WARNINGS),
-        "previews": [base64.b64encode(b"\x89PNG\r\n\x1a\nsynthetic").decode()],
+        "previews": ["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"],
     }
 
 
@@ -240,7 +240,7 @@ def test_real_landlock_denies_same_uid_file_outside_allowlist(tmp_path):
     allowed.write_text("synthetic model fixture")
     module = Path(__file__).resolve().parents[1] / "app/domain/documents"
     code = f"""
-import sys, errno
+import sys, errno, os
 from pathlib import Path
 sys.path.insert(0, {str(module)!r})
 from layout_subprocess import _restrict, _landlock
@@ -264,6 +264,14 @@ except OSError as exc:
     assert exc.errno == errno.EACCES
 else:
     raise AssertionError('Model unexpectedly writable')
+for target in ({str(allowed)!r}, {str(secret)!r}):
+    for mutate in (lambda: os.truncate(target, 0), lambda: os.open(target, os.O_RDONLY | os.O_TRUNC)):
+        try:
+            mutate()
+        except OSError as exc:
+            assert exc.errno == errno.EACCES
+        else:
+            raise AssertionError('Unexpected truncation permission')
 """
     result = subprocess.run([sys.executable, "-I", "-c", code], timeout=10)
     if result.returncode == 77:
@@ -317,3 +325,18 @@ def test_preview_validation_and_optional_coverage_warning():
     value["previews"] = []
     with pytest.raises(LayoutError, match="invalid_output"):
         _decode_result(json.dumps(value).encode())
+
+
+@pytest.mark.parametrize("abi", [1, 2])
+def test_old_landlock_abi_fails_closed_before_rules(tmp_path, abi):
+    from unittest.mock import MagicMock
+
+    from app.domain.documents.layout_subprocess import _landlock
+
+    libc = MagicMock()
+    libc.syscall.return_value = abi
+    with patch("ctypes.CDLL", return_value=libc):
+        with pytest.raises(Exception, match="sandbox_unavailable"):
+            _landlock(tmp_path, tmp_path)
+    libc.prctl.assert_not_called()
+    assert libc.syscall.call_count == 1

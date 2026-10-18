@@ -56,3 +56,9 @@ OCR is disabled in this baseline. Scanned pages can provide source visual eviden
 
 
 The required `Isolated local layout engine` CI workflow runs the production adapter unchanged on a generated synthetic PDF, asserting real canonical text and PNG evidence. It fails rather than skipping when explicitly enabled assets or Linux isolation are unavailable. The optional local test skips only when no smoke-assets path was configured. This development host lacks Landlock (`ENOSYS`), so local mocked tests or unsandboxed conversion diagnostics are not successful isolated runtime evidence. Check the exact commit's required hosted smoke result before activation.
+
+### Host containment prerequisites
+
+Landlock ABI 3 or newer is required; older ABI versions leave truncation unmediated and are rejected. The service must run as a dedicated non-root UID. The subprocess caps the UID's processes/threads at 64 and denies separate-process creation, cross-process memory/descriptor access and signals, and filesystem ownership/permission/timestamp/xattr mutations. Host administrators must additionally bound the parser's temporary filesystem size/inode count and apply service-level memory/PID limits (for example a dedicated quota-controlled temporary volume and cgroup). `RLIMIT_FSIZE` limits each file, not total scratch usage; no application claim of a full VM/container sandbox or total-host DoS isolation is made. Do not enable the worker on a shared privileged service account or without these host limits.
+
+Source PNGs are validated before storage and on every serve: only bounded RGB/RGBA 8-bit noninterlaced PNGs, valid chunk CRC/order, exact bounded decompression, and no metadata chunks or trailing bytes. The API performs no native image decoding or PDF rendering.

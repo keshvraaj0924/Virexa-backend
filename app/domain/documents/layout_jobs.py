@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.audit.service import record
 from app.domain.documents.layout_models import LayoutJob
+from app.domain.documents.layout_previews import validate_preview
 from app.domain.documents.layout_routes import PIPELINE_VERSION
 from app.domain.documents.models import Document, ScanJob, Upload
 from app.domain.documents.scan_jobs import aware, now, read_snapshot
@@ -19,7 +20,7 @@ from app.domain.documents.storage import QuarantineStorage
 async def audit(db: AsyncSession, job: LayoutJob, outcome: str):
     await record(db, organization_id=job.organization_id, actor_user_id=job.actor_user_id,
                  action=f"document.layout.{outcome}", request_id=str(uuid4()),
-                 resource_id=job.document_id)
+                 resource_id=job.id)
 
 
 async def claim(db: AsyncSession) -> tuple[UUID, UUID] | None:
@@ -97,9 +98,8 @@ async def run_once(factory: async_sessionmaker, storage: QuarantineStorage, pars
             preview_bytes = parsed.previews
             if len(preview_bytes) != parsed.page_count or sum(map(len, preview_bytes)) > 8 * 1024 * 1024:
                 raise ValueError("Missing or oversized source previews")
-            if any(not image.startswith(b"\x89PNG\r\n\x1a\n") or len(image) > 1024 * 1024
-                   for image in preview_bytes):
-                raise ValueError("Invalid source preview")
+            for image in preview_bytes:
+                validate_preview(image)
             previews = [base64.b64encode(image).decode("ascii") for image in preview_bytes]
             result = dict(resultVersion="layout-result-v1", reviewStatus="needs_review",
                           sourceSha256=job.checksum_sha256, pipelineVersion=job.pipeline_version,

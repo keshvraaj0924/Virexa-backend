@@ -18,6 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    from .layout_previews import validate_preview
+except ImportError:  # Fixed isolated subprocess imports the application-owned sibling.
+    from layout_previews import validate_preview
+
 PIPELINE_VERSION = "docling-local-v1"
 PARSER_VERSION = "2.60.1"
 HERON_REVISION = "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8"
@@ -101,11 +106,8 @@ def _decode_result(payload: bytes) -> ParseResult:
         ):
             raise ValueError
         previews = tuple(base64.b64decode(item, validate=True) for item in result["previews"])
-        if any(
-            not image.startswith(b"\x89PNG\r\n\x1a\n") or len(image) > MAX_PREVIEW_BYTES
-            for image in previews
-        ):
-            raise ValueError
+        for image in previews:
+            validate_preview(image)
         return ParseResult(
             canonical, pages, PARSER_VERSION, MODEL_VERSION, tuple(result["warnings"]), previews
         )

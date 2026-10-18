@@ -27,5 +27,8 @@ jobs:
         env:
           VIREXA_LAYOUT_SMOKE_ASSETS: ${{ runner.temp }}/layout-models
         run: python -m pytest -q tests/test_layout_smoke.py
+      - name: Synthetic-only same-sandbox diagnostic on smoke failure
+        if: failure()
+        run: timeout 200 python tools/extraction_eval/diagnose_layout_synthetic.py "$RUNNER_TEMP/layout-models"
       - name: Adapter protocol, resource, filesystem and network isolation regressions
         run: python -m pytest -q tests/test_layout_adapter.py

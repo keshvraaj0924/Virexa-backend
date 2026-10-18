@@ -12,6 +12,7 @@ from app.core.policy import Action, require_document
 from app.db.models import Organization
 from app.domain.audit.service import record
 from app.domain.documents.layout_models import LayoutJob
+from app.domain.documents.layout_previews import validate_preview
 from app.domain.documents.layout_schemas import (
     LayoutList,
     LayoutRequest,
@@ -93,7 +94,7 @@ async def request_layout(document_id: UUID, data: LayoutRequest,
         await db.flush()
         await record(db, organization_id=context.organization_id, actor_user_id=context.user_id,
                      action="document.layout.requested", request_id=request.state.request_id,
-                     resource_id=doc.id)
+                     resource_id=job.id)
     await db.commit()
     return success_response(request, {"job": public_job(job), "replayed": replayed})
 
@@ -157,8 +158,7 @@ async def get_layout_page(document_id: UUID, job_id: UUID, page_number: int,
         await verified_source(db, job)
         await asyncio.to_thread(read_snapshot, storage(request), job, doc)
         image = base64.b64decode(job.page_previews[page_number - 1], validate=True)
-        if not image.startswith(b"\x89PNG\r\n\x1a\n") or len(image) > 1024 * 1024:
-            raise ValueError("Invalid preview")
+        validate_preview(image)
     except (OSError, ValueError):
         raise ApiError(409, "LAYOUT_SOURCE_CHANGED", "Private source integrity check failed.") from None
     return Response(image, media_type="image/png", headers={

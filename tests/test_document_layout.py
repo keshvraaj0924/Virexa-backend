@@ -26,7 +26,7 @@ from app.domain.documents.layout_models import LayoutJob
 from app.domain.documents.models import Document, ScanJob
 from app.domain.documents.scan_jobs import now
 
-PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1kAAAAASUVORK5CYII=')
+PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC')
 
 
 class MockParser:
