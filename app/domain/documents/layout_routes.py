@@ -92,6 +92,7 @@ async def request_layout(document_id: UUID, data: LayoutRequest,
         doc.status = "review_required"
         doc.updated_at = now()
         await db.flush()
+        doc.current_layout_job_id = job.id
         await record(db, organization_id=context.organization_id, actor_user_id=context.user_id,
                      action="document.layout.requested", request_id=request.state.request_id,
                      resource_id=job.id)

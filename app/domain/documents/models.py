@@ -38,6 +38,8 @@ class Document(Base):
     media_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int] = mapped_column(Integer)
     checksum_sha256: Mapped[str] = mapped_column(String(64))
+    # Server-owned current candidate identity; never chosen by wall-clock ordering.
+    current_layout_job_id: Mapped[UUID | None] = mapped_column(nullable=True)
     external_reference: Mapped[str | None] = mapped_column(String(255))
     source: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(30), default="received")

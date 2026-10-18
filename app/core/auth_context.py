@@ -18,6 +18,7 @@ class AuthContext:
     organization_id: UUID
     role: Role
     account_type: str = "organization"
+    session_id: UUID | None = None
 
 
 _authentication = AuthenticationService()
@@ -39,7 +40,7 @@ async def get_auth_context(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session"
         )
 
-    user, _ = resolved
+    user, session = resolved
     try:
         role = Role(user.role)
     except ValueError as exc:
@@ -55,6 +56,7 @@ async def get_auth_context(
         organization_id=user.organization_id,
         role=role,
         account_type=organization.account_type,
+        session_id=session.id,
     )
     request.state.audit_subject = context
     return context

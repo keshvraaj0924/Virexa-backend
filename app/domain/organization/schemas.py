@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 TenantRole = Literal[
-    "tenant_admin", "organization_admin", "manager", "operator", "viewer", "auditor"
+    "tenant_admin", "organization_admin", "manager", "operator", "viewer", "auditor", "reviewer"
 ]
 
 

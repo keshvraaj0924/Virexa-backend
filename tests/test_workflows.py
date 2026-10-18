@@ -122,8 +122,8 @@ async def test_trusted_role_owner_and_tenant_policy(app, role):
             )
             await db.execute(update(User).where(User.id == UUID(who["id"])).values(role=role.value))
             await db.commit()
-        readable = role != Role.AUDITOR
-        writable = role not in {Role.AUDITOR, Role.VIEWER}
+        readable = role not in {Role.AUDITOR, Role.REVIEWER}
+        writable = role not in {Role.AUDITOR, Role.VIEWER, Role.REVIEWER}
         manager = role in {
             Role.PLATFORM_ADMIN,
             Role.TENANT_ADMIN,

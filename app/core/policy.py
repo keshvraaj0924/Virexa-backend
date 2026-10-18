@@ -39,6 +39,7 @@ class Action(StrEnum):
     USAGE_ORGANIZATION_READ = "usage:organization:read"
     LAYOUT_REQUEST = "document:layout:request"
     DOCUMENT_READ = "document:read"
+    DOCUMENT_REVIEW = "document:review"
     DOCUMENT_CREATE = "document:create"
     DOCUMENT_UPLOAD = "document:upload"
     SESSION_READ = "session:read"
@@ -83,6 +84,9 @@ def role_allows(subject: Subject, action: Action) -> bool:
         if action != Action.MEMBERS_MANAGE:
             allowed.add(Role.AUDITOR)
         return subject.role in allowed
+    if action == Action.DOCUMENT_REVIEW:
+        return subject.role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN,
+                                Role.ORGANIZATION_ADMIN, Role.REVIEWER}
     if action == Action.WORKFLOW_MANAGE:
         return subject.role in {
             Role.PLATFORM_ADMIN,

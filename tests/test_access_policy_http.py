@@ -83,6 +83,7 @@ BASE = "/api/v1"
         ),
         ("viewer", ["document:read", "session:read", "session:revoke"]),
         ("auditor", ["session:read", "session:revoke"]),
+        ("reviewer", ["document:read", "session:read", "session:revoke"]),
     ],
 )
 async def test_effective_capabilities_use_live_database_role(app, role, expected):
@@ -92,11 +93,13 @@ async def test_effective_capabilities_use_live_database_role(app, role, expected
         expected += ["organization:members:read", "organization:hierarchy:read"]
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN}:
         expected += ["organization:members:manage"]
+    if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.REVIEWER}:
+        expected += ["document:review"]
     expected = sorted(
         expected
         + ["usage:read"]
-        + (["workflow:read"] if role != Role.AUDITOR else [])
-        + (["workflow:create"] if role not in {Role.AUDITOR, Role.VIEWER} else [])
+        + (["workflow:read"] if role not in {Role.AUDITOR, Role.REVIEWER} else [])
+        + (["workflow:create"] if role not in {Role.AUDITOR, Role.VIEWER, Role.REVIEWER} else [])
         + (
             ["workflow:manage"]
             if role
