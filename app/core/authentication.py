@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.security import hash_password, session_token_digest, verify_password
 from app.core.session import SessionManager
 from app.db.models import Session, User
+from app.domain.audit.service import record
 
 # Equal-cost password verification for absent or ambiguous identities.
 _DUMMY_HASH = hash_password("unused-random-dummy-verification-value")
@@ -46,13 +47,16 @@ class AuthenticationService:
             return None
         return user, session
 
-    async def revoke(self, db: AsyncSession, token: str) -> bool:
+    async def revoke(self, db: AsyncSession, token: str, *, request_id: str | None = None) -> bool:
         owner_id = await db.scalar(
             select(Session.user_id).where(Session.token_digest == session_token_digest(token))
         )
         if owner_id is None:
             return False
         await db.execute(select(User.id).where(User.id == owner_id).with_for_update())
+        target = await db.scalar(select(Session).where(
+            Session.token_digest == session_token_digest(token), Session.revoked_at.is_(None)
+        ))
         result = await db.execute(
             update(Session)
             .where(
@@ -60,6 +64,9 @@ class AuthenticationService:
             )
             .values(revoked_at=datetime.now(timezone.utc))
         )
+        if result.rowcount == 1 and target is not None and request_id:
+            await record(db, organization_id=target.organization_id, actor_user_id=owner_id,
+                         action="auth.logout", request_id=request_id, resource_id=target.id)
         await db.commit()
         return result.rowcount == 1
 

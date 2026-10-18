@@ -16,6 +16,7 @@ from app.core.rbac import Role
 from app.core.session import SessionManager
 from app.db.base import get_db_session
 from app.db.models import Session, User
+from app.domain.audit.service import record
 
 router = APIRouter(prefix="/auth/sessions", tags=["sessions"])
 authentication = AuthenticationService()
@@ -39,6 +40,7 @@ async def resolve_owner(request: Request, db: AsyncSession, *, lock: bool = Fals
     user, session = resolved
     if user.role not in {role.value for role in Role}:
         raise ApiError(403, "FORBIDDEN", "Invalid account role.")
+    request.state.audit_subject = subject(user)
     return user, session
 
 
@@ -111,9 +113,20 @@ async def revoke_others(request: Request, db: AsyncSession = Depends(get_db_sess
         update(Session)
         .where(*active_scope(user), Session.id != current.id)
         .values(revoked_at=datetime.now(timezone.utc))
+        .returning(Session.id)
         .execution_options(synchronize_session=False)
     )
-    count = result.rowcount
+    targets = list(result.scalars())
+    count = len(targets)
+    for identity in targets:
+        await record(
+            db,
+            organization_id=user.organization_id,
+            actor_user_id=user.id,
+            action="auth.session.revoked",
+            request_id=request.state.request_id,
+            resource_id=identity,
+        )
     await db.commit()
     return success_response(request, {"revokedCount": count})
 
@@ -127,9 +140,7 @@ async def revoke_one(
 ):
     user, current = await resolve_owner(request, db, lock=True)
     authorize_session(user, Action.SESSION_REVOKE, current)
-    target = await db.scalar(
-        select(Session).where(*active_scope(user), Session.id == session_id)
-    )
+    target = await db.scalar(select(Session).where(*active_scope(user), Session.id == session_id))
     if target is None:
         raise ApiError(404, "NOT_FOUND", "Active session was not found.")
     authorize_session(user, Action.SESSION_REVOKE, target)
@@ -142,6 +153,14 @@ async def revoke_one(
     )
     if result.rowcount != 1:
         raise ApiError(404, "NOT_FOUND", "Active session was not found.")
+    await record(
+        db,
+        organization_id=user.organization_id,
+        actor_user_id=user.id,
+        action="auth.session.revoked",
+        request_id=request.state.request_id,
+        resource_id=session_id,
+    )
     await db.commit()
     if session_id == current.id:
         settings = request.app.state.settings
