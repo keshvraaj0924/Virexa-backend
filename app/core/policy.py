@@ -23,8 +23,14 @@ class Subject(Protocol):
     @property
     def role(self) -> Role: ...
 
+    @property
+    def account_type(self) -> str: ...
+
 
 class Action(StrEnum):
+    MEMBERS_READ = "organization:members:read"
+    MEMBERS_MANAGE = "organization:members:manage"
+    HIERARCHY_READ = "organization:hierarchy:read"
     WORKFLOW_READ = "workflow:read"
     WORKFLOW_CREATE = "workflow:create"
     WORKFLOW_MANAGE = "workflow:manage"
@@ -69,6 +75,13 @@ class PolicyDenied(ApiError):
 def role_allows(subject: Subject, action: Action) -> bool:
     if subject.role not in set(Role):
         return False
+    if action in {Action.MEMBERS_READ, Action.MEMBERS_MANAGE, Action.HIERARCHY_READ}:
+        if getattr(subject, "account_type", None) != "organization":
+            return False
+        allowed = {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN}
+        if action != Action.MEMBERS_MANAGE:
+            allowed.add(Role.AUDITOR)
+        return subject.role in allowed
     if action == Action.WORKFLOW_MANAGE:
         return subject.role in {
             Role.PLATFORM_ADMIN,
