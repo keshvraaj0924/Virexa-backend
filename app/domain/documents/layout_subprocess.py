@@ -16,6 +16,7 @@ import importlib.metadata
 import io
 import json
 import math
+import mimetypes
 import os
 import re
 import resource
@@ -267,6 +268,10 @@ def _parse(data: bytes, assets: Path) -> dict:
     if not data.startswith(b"%PDF-"):
         raise LayoutError("invalid_pdf")
     _assets(assets)
+    # PDF-only pipeline uses builtin MIME types. Do not consult host /etc MIME
+    # databases via eagerly imported optional Office backends.
+    mimetypes.knownfiles = []
+    mimetypes.init()
     try:
         if importlib.metadata.version("docling") != PARSER_VERSION:
             raise LayoutError("parser_unavailable")

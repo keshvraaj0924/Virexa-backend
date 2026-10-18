@@ -113,7 +113,7 @@ def test_real_seccomp_denies_network():
         pytest.skip("Linux seccomp required")
     module = Path(__file__).resolve().parents[1] / "app/domain/documents"
     code = f"""
-import sys, socket, errno, os, threading
+import sys, socket, errno, os, threading, ctypes, resource
 sys.path.insert(0, {str(module)!r})
 from layout_subprocess import _restrict
 from layout_adapter import LayoutError
@@ -138,6 +138,24 @@ except OSError as exc:
     assert exc.errno == errno.EPERM
 else:
     raise AssertionError('Separate-process fork unexpectedly allowed')
+
+assert resource.getrlimit(resource.RLIMIT_NPROC) == (64, 64)
+try:
+    os.kill(os.getpid(), 0)
+except OSError as exc:
+    assert exc.errno == errno.EPERM
+else:
+    raise AssertionError('Process signaling unexpectedly allowed')
+libc = ctypes.CDLL(None, use_errno=True)
+assert libc.process_vm_readv(os.getpid(), None, 0, None, 0, 0) == -1
+assert ctypes.get_errno() == errno.EPERM
+if hasattr(os, 'pidfd_open'):
+    try:
+        os.pidfd_open(os.getpid(), 0)
+    except OSError as exc:
+        assert exc.errno == errno.EPERM
+    else:
+        raise AssertionError('Process descriptor unexpectedly allowed')
 """
     result = subprocess.run([sys.executable, "-I", "-c", code], timeout=10)
     if result.returncode == 77:

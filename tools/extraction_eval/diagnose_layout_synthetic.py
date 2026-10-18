@@ -19,7 +19,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Supply the provisioned asset root only.")
     data = synthetic_pdf()
-    with tempfile.TemporaryDirectory(prefix="layout-synthetic-diagnostic-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="layout-synthetic-diagnostic-", ignore_cleanup_errors=True) as temporary:
         scratch = Path(temporary)
         os.environ.update(HOME=temporary, TMPDIR=temporary, HF_HOME=temporary,
                           HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",

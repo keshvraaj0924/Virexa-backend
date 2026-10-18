@@ -166,6 +166,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         elif (
             request.url.path.startswith(settings.api_prefix + "/documents")
             and "/extractions" not in request.url.path
+            and "/layout-jobs" not in request.url.path
             and request.method in {"POST", "PUT"}
         ):
             action = "document.intake.failed"
