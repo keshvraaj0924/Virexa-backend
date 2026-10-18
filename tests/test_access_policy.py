@@ -27,7 +27,7 @@ def test_capability_matrix_matches_decisions(role):
     if role not in {Role.AUDITOR, Role.VIEWER}:
         expected |= {"document:create", "document:upload", "workflow:create"}
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.MANAGER}:
-        expected |= {"organization:read", "workflow:manage"}
+        expected |= {"organization:read", "workflow:manage", "document:layout:request"}
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.AUDITOR}:
         expected |= {"organization:members:read", "organization:hierarchy:read"}
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN}:

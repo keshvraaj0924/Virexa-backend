@@ -10,6 +10,9 @@ from app.domain.audit.models import AuditEvent
 
 # There is deliberately no arbitrary metadata argument or client write endpoint.
 ACTIONS = {
+    "document.layout.requested": ("document_layout", "succeeded"),
+    "document.layout.needs_review": ("document_layout", "succeeded"),
+    "document.layout.error": ("document_layout", "failed"),
     "organization.member.role_updated": ("user", "succeeded"),
     "auth.signup.completed": ("user", "succeeded"),
     "auth.login": ("session", "succeeded"),
