@@ -1,90 +1,55 @@
-> Python organization administration: [existing-member roster and role controls](docs/organization-members.md), with tenant scope, individual-account gating, and last-admin protection. No invitations or user provisioning.
+# Virexa Backend integration candidate
 
-> Python workflow milestone: [workflow tracking records](docs/PYTHON_WORKFLOW_RECORDS.md) ports tenant-scoped metadata CRUD, idempotency and version conflicts. It does not execute workflows or integrations.
+One runnable review candidate pairing the FastAPI backend and Next.js frontend.
+This is a draft for isolated local evaluation; it is not production-ready.
 
-> Python audit milestone: [tenant audit trail](docs/audit-trail.md) covers supported forward-only events and a paginated tenant-only read API. It is not a complete historical/compliance log.
+Start with [the paired developer guide](docs/DEVELOPER_GUIDE.md): prerequisites,
+exact source pins, isolated PostgreSQL setup, private environment examples,
+synthetic verification email, API contracts, feature flags, run/test commands and
+known limitations. Windows backend evaluation requires WSL2/Linux with private
+storage inside its Linux filesystem; native Windows intake is unsupported.
 
-> Python candidate update: email-verified individual/organization signup is documented in [verified signup](docs/verified-signup.md). The legacy `/auth/register` contract below is TypeScript/history only; Python returns 410 by default. SMTP delivery defaults disabled until configured. Existing accounts keep their logins and tenant ownership.
+## Implemented scope
 
-# Virexa Backend
+| Area | Available in this candidate | Boundary |
+| --- | --- | --- |
+| Accounts | Verified Individual/Organization signup, login/logout, sessions | One workspace per email; real provider delivery unconfigured |
+| Access | Server capabilities, tenant/ownership checks, live role resolution | No client-side or platform-role tenant bypass |
+| Documents | Private bounded quarantine intake and status | No public download, extraction, OCR or promotion |
+| Scanning | Optional local ClamAV worker, durable leases, clean/rejected status | Disabled by default; clean is not a safety guarantee |
+| Usage | Personal/organization meters and entitlements preview | No actual billing or invented AI/OCR metrics |
+| Audit | Supported tenant-only forward events and pagination | No complete historical/compliance guarantee |
+| Workflows | Versioned tracking records and lifecycle metadata | No runner, integrations or AI execution |
+| Team | Existing-member roster and role controls | No invites/provisioning; organization only; last-admin protection |
 
-Enterprise API foundation for Virexa.
+The design still needs user acceptance. All evaluation must use synthetic accounts
+and files. Never upload private documents, SMTP credentials, cookies, verification
+proofs or customer samples to this public repository.
 
-## API principles
+## Review and validation
 
-- Contract-first REST API
-- Versioned endpoints under `/api/v1`
-- Consistent success/error envelopes
-- Request correlation IDs
-- Structured request completion telemetry
-- RBAC enforced server-side for every protected resource
-- Authentication designed around secure, HttpOnly session cookies rather than browser-managed bearer secrets
-- Authenticated data responses explicitly disable browser/intermediary caching
-- Authentication endpoints enforce abuse-resistant request limits
-- Auditability and least-privilege access as first-class concerns
+All existing milestone branches and PRs remain unchanged. The integration branch
+targets `main` only for review; it does not merge or deploy anything. CI checks exact
+PR heads. The nine real frontend browser workflows hard-pin the matching backend.
+Backend CI separately covers PostgreSQL races/isolation and genuine ClamAV with
+fresh official definitions; frontend scan tests exercise the real lease worker
+with a deterministic protocol fixture, not a substitute malware engine.
 
-## Observability
+Check the exact integration PR head's CI before relying on it. Source-milestone
+passes are not an integration-head pass. Current CI definitions are executable
+validation instructions; [the guide](docs/DEVELOPER_GUIDE.md) explains which tests
+need disposable databases and local engine services.
 
-Every request receives a correlation ID. On completion, the API emits a structured `Request completed` log containing the request ID, HTTP method, matched route template, status code, and elapsed duration in milliseconds. Request bodies, cookies, authorization headers, query strings, and response payloads are intentionally excluded from this telemetry to avoid leaking credentials or tenant data.
+## Code and historical material
 
-## Authenticated response caching
+`app/` and `alembic/` are the Python runtime and migration chain. `src/` and
+`migrations/` remain the separate legacy TypeScript backend; do not mix databases
+or run the Node migration chain against Python data.
 
-Responses that expose authenticated identity, audit, or workflow data are marked `Cache-Control: private, no-store, max-age=0`, with `Pragma: no-cache` and `Expires: 0`. This prevents browser and intermediary caches from retaining tenant-scoped operational data or session context. Public liveness/readiness responses are not subject to this application-level sensitive-data policy.
-
-## Authentication abuse protection
-
-`POST /api/v1/auth/register` and `POST /api/v1/auth/login` are limited to 10 requests per client IP within a 5-minute window. The API returns HTTP `429` with the versioned `RATE_LIMITED` error code and a `Retry-After` response header when the limit is exceeded.
-
-The limiter uses the process-local store provided by `@fastify/rate-limit`. This is intentionally a first-layer control for the current single-process deployment shape. A multi-replica deployment must provide a shared rate-limit store (for example Redis) before relying on the limit as a fleet-wide quota.
-
-## Operational endpoints
-
-### `GET /health`
-
-Liveness probe. Returns `200` when the HTTP process is responsive. It intentionally does not require database connectivity so an orchestrator can distinguish a live process from a dependency failure.
-
-### `GET /ready`
-
-Readiness probe. Executes a real `SELECT 1` against the configured PostgreSQL database through the application repository pool. Returns `200` only when the database dependency is reachable; otherwise returns the standard `503 DEPENDENCY_UNAVAILABLE` error envelope. Both endpoints include the request correlation ID in the standard response metadata.
-
-## Initial authentication contract
-
-### `POST /api/v1/auth/register`
-
-Request:
-
-```json
-{
-  "displayName": "Ada Lovelace",
-  "email": "ada@example.com",
-  "password": "strong-password",
-  "organizationName": "Example Operations"
-}
-```
-
-### `POST /api/v1/auth/login`
-
-Request:
-
-```json
-{
-  "email": "ada@example.com",
-  "password": "strong-password"
-}
-```
-
-### `GET /api/v1/auth/session`
-
-Returns the authenticated user's session and organization context. The response is explicitly non-cacheable.
-
-### `POST /api/v1/auth/logout`
-
-Invalidates the active server-side session.
-
-All successful responses use `{ "data": ..., "meta": { "requestId": ..., "timestamp": ... } }`. Errors use `{ "error": { "code": ..., "message": ..., "requestId": ..., "fieldErrors": ... }, "meta": ... }`.
-
-### Optional Python private document scanning
-
-See [local document scanning](docs/local-document-scanning.md) for the disabled-by-default
-ClamAV Unix-socket worker, durable leases, tests, and explicit operator prerequisites.
-Scanning does not enable extraction or public downloads.
+Earlier setup and architectural context is preserved in
+[the historical README](docs/LEGACY_README.md). It contains legacy contracts and
+milestone pins; use the current developer guide instead for this paired candidate.
+Production requires separate reviewed data/schema cutover, dependency locking,
+HTTPS/cookie/proxy review, durable email, distributed limits, storage operations
+and deployment decisions. Offline extraction evaluation does not enable an OCR
+pipeline; optional PyMuPDF license review remains a prerequisite to product use.
