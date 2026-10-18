@@ -17,7 +17,7 @@ from app.core.policy import Action, DocumentAttributes, require_action, require_
 from app.db.base import get_db_session
 from app.db.models import Organization
 from app.domain.audit.service import record
-from app.domain.documents.models import Document, Upload
+from app.domain.documents.models import Document, ScanJob, Upload
 from app.domain.documents.pagination import decode_document_cursor, encode_document_cursor
 from app.domain.documents.schemas import (
     ERROR_RESPONSES,
@@ -403,6 +403,10 @@ async def complete(document_id: UUID, attempt_id: UUID, request: Request, contex
         )
         row.status = "completed"
         row.completed_at = row.updated_at = now()
+        db.add(ScanJob(organization_id=context.organization_id, document_id=doc.id,
+                       upload_id=row.id, actor_user_id=context.user_id,
+                       checksum_sha256=doc.checksum_sha256,
+                       available_at=now(), created_at=now(), updated_at=now()))
         doc.scan_status = "pending_scan"
         doc.updated_at = now()
         await record(db, organization_id=context.organization_id, actor_user_id=context.user_id,
