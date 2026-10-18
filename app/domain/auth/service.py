@@ -11,6 +11,7 @@ from app.core.errors import ApiError
 from app.core.rbac import Role
 from app.core.session import SessionManager
 from app.db.models import Organization, Session, User
+from app.domain.audit.service import record
 from app.domain.auth.schemas import RegisterRequest
 
 
@@ -38,7 +39,7 @@ async def issue_session(
     return token, session
 
 
-async def register(db: AsyncSession, data: RegisterRequest, ttl: int):
+async def register(db: AsyncSession, data: RegisterRequest, ttl: int, *, request_id: str | None = None):
     email = str(data.email).lower()
     existing = await db.scalar(select(User.id).where(func.lower(User.email) == email).limit(1))
     if existing:
@@ -58,6 +59,9 @@ async def register(db: AsyncSession, data: RegisterRequest, ttl: int):
     try:
         await db.flush()
         token, session = await issue_session(db, user, ttl)
+        if request_id:
+            await record(db, organization_id=user.organization_id, actor_user_id=user.id,
+                         action="auth.signup.completed", request_id=request_id, resource_id=user.id)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()

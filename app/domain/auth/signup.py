@@ -17,6 +17,7 @@ from app.core.authentication import AuthenticationService
 from app.core.errors import ApiError
 from app.db.base import Base
 from app.db.models import Organization, User
+from app.domain.audit.service import record
 from app.domain.auth.schemas import RegisterRequest
 from app.domain.auth.service import issue_session, session_payload
 
@@ -214,7 +215,7 @@ async def verify(db: AsyncSession, data: VerifySignup):
     }
 
 
-async def complete(db: AsyncSession, data: CompleteSignup, ttl: int):
+async def complete(db: AsyncSession, data: CompleteSignup, ttl: int, *, request_id: str | None = None):
     row = await locked(db, data.challenge_id)
     if (
         not row
@@ -249,6 +250,9 @@ async def complete(db: AsyncSession, data: CompleteSignup, ttl: int):
     await db.flush()
     token, session = await issue_session(db, user, ttl)
     row.setup_digest = None
+    if request_id:
+        await record(db, organization_id=user.organization_id, actor_user_id=user.id,
+                     action="auth.signup.completed", request_id=request_id, resource_id=user.id)
     await db.commit()
     return token, session_payload(user, organization, session)
 

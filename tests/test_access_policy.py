@@ -21,7 +21,7 @@ def test_capability_matrix_matches_decisions(role):
     subject = AuthContext(uuid4(), uuid4(), role)
     expected = {"session:read", "session:revoke", "usage:read"}
     if role in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.AUDITOR}:
-        expected.add("usage:organization:read")
+        expected |= {"usage:organization:read", "audit:read"}
     if role != Role.AUDITOR:
         expected.add("document:read")
     if role not in {Role.AUDITOR, Role.VIEWER}:

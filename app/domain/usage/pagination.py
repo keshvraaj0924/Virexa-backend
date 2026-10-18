@@ -23,6 +23,8 @@ def decode(cursor, scope):
         data = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
         if not isinstance(data, list) or len(data) != 3 or data[0] != scope:
             raise ValueError()
+        if not isinstance(data[1], str) or not isinstance(data[2], str):
+            raise ValueError()
         at, identity = datetime.fromisoformat(data[1]), UUID(data[2])
         if at.tzinfo is None:
             raise ValueError()

@@ -45,7 +45,9 @@ async def get_auth_context(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid account role"
         ) from exc
 
-    return AuthContext(user_id=user.id, organization_id=user.organization_id, role=role)
+    context = AuthContext(user_id=user.id, organization_id=user.organization_id, role=role)
+    request.state.audit_subject = context
+    return context
 
 
 def require_permission(permission: Permission):

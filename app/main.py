@@ -25,6 +25,8 @@ from app.core.policy import Action, capabilities
 from app.core.rbac import Role
 from app.db.base import get_db_session
 from app.db.models import Organization
+from app.domain.audit.routes import router as audit_router
+from app.domain.audit.service import record
 from app.domain.auth import signup
 from app.domain.auth.permissions import WIRE_ROLE_PERMISSIONS
 from app.domain.auth.schemas import LoginRequest, RegisterRequest
@@ -91,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(documents_router, prefix=settings.api_prefix)
     app.include_router(sessions_router, prefix=settings.api_prefix)
     app.include_router(usage_router, prefix=settings.api_prefix)
+    app.include_router(audit_router, prefix=settings.api_prefix)
     limiter = AuthRateLimiter()
     authentication = AuthenticationService()
     app.add_middleware(
@@ -148,8 +151,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["Expires"] = "0"
         return response
 
+    async def record_failure(request: Request, status_code: int):
+        subject = getattr(request.state, "audit_subject", None)
+        if subject is None:
+            return
+        action = None
+        if status_code in {403, 404}:
+            action = "access.denied"
+        elif (
+            request.url.path.startswith(settings.api_prefix + "/documents")
+            and "/extractions" not in request.url.path
+            and request.method in {"POST", "PUT"}
+        ):
+            action = "document.intake.failed"
+        if action is None:
+            return
+        try:
+            async with app.state.session_factory() as audit_db:
+                await record(
+                    audit_db, organization_id=subject.organization_id,
+                    actor_user_id=subject.user_id, action=action,
+                    request_id=request.state.request_id,
+                )
+                await audit_db.commit()
+        except (SQLAlchemyError, ValueError):
+            # An actor deleted/moved after authentication is no longer safe to record.
+            # Error events are best effort: do not replace the original safe response.
+            logger.error("Audit error recording unavailable request_id=%s", request.state.request_id)
+
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError):
+        await record_failure(request, exc.status)
         headers = (
             {"Retry-After": "60" if exc.code == "SIGNUP_COOLDOWN" else "300"}
             if exc.status == 429
@@ -161,6 +193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException):
+        await record_failure(request, exc.status_code)
         codes = {401: "UNAUTHENTICATED", 403: "FORBIDDEN", 404: "NOT_FOUND"}
         return JSONResponse(
             error_response(request, codes.get(exc.status_code, "INVALID_REQUEST"), str(exc.detail)),
@@ -232,7 +265,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         if not settings.allow_legacy_registration:
             raise ApiError(410, "VERIFIED_SIGNUP_REQUIRED", "Use email-verified signup.")
-        token, payload = await register(db, data, settings.session_ttl_seconds)
+        token, payload = await register(db, data, settings.session_ttl_seconds, request_id=request.state.request_id)
         set_cookie(response, token)
         return success_response(request, payload)
 
@@ -263,7 +296,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response: Response,
         db: AsyncSession = Depends(get_db_session),
     ):
-        token, payload = await signup.complete(db, data, settings.session_ttl_seconds)
+        token, payload = await signup.complete(db, data, settings.session_ttl_seconds, request_id=request.state.request_id)
         set_cookie(response, token)
         return success_response(request, payload)
 
@@ -289,6 +322,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db, user, settings.session_ttl_seconds, expected_password_hash=user.password_hash
         )
         organization = await db.get(Organization, user.organization_id)
+        await record(db, organization_id=user.organization_id, actor_user_id=user.id,
+                     action="auth.login", request_id=request.state.request_id, resource_id=session.id)
         await db.commit()
         set_cookie(response, token)
         return success_response(request, session_payload(user, organization, session))
@@ -327,7 +362,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         token = request.cookies.get(settings.session_cookie_name)
         if token:
-            await authentication.revoke(db, token)
+            await authentication.revoke(db, token, request_id=request.state.request_id)
         response.delete_cookie(
             settings.session_cookie_name,
             path="/",

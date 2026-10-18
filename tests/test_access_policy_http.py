@@ -90,7 +90,7 @@ async def test_effective_capabilities_use_live_database_role(app, role, expected
         expected
         + ["usage:read"]
         + (
-            ["usage:organization:read"]
+            ["usage:organization:read", "audit:read"]
             if role
             in {Role.PLATFORM_ADMIN, Role.TENANT_ADMIN, Role.ORGANIZATION_ADMIN, Role.AUDITOR}
             else []

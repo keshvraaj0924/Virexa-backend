@@ -16,6 +16,7 @@ from app.core.errors import ApiError
 from app.core.policy import Action, DocumentAttributes, require_action, require_document
 from app.db.base import get_db_session
 from app.db.models import Organization
+from app.domain.audit.service import record
 from app.domain.documents.models import Document, Upload
 from app.domain.documents.pagination import decode_document_cursor, encode_document_cursor
 from app.domain.documents.schemas import (
@@ -180,6 +181,10 @@ async def create(data: CreateDocument, request: Request, context: Write, db: DB)
     )
     db.add(row)
     try:
+        await db.flush()
+        await record(db, organization_id=context.organization_id, actor_user_id=context.user_id,
+                     action="document.created", request_id=request.state.request_id,
+                     resource_id=row.id)
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -400,6 +405,9 @@ async def complete(document_id: UUID, attempt_id: UUID, request: Request, contex
         row.completed_at = row.updated_at = now()
         doc.scan_status = "pending_scan"
         doc.updated_at = now()
+        await record(db, organization_id=context.organization_id, actor_user_id=context.user_id,
+                     action="document.intake.completed", request_id=request.state.request_id,
+                     resource_id=doc.id)
         await db.commit()
     return success_response(request, {"attempt": public_attempt(row), "replayed": replayed})
 

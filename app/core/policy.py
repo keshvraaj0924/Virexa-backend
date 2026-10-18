@@ -25,6 +25,7 @@ class Subject(Protocol):
 
 
 class Action(StrEnum):
+    AUDIT_READ = "audit:read"
     USAGE_READ = "usage:read"
     USAGE_ORGANIZATION_READ = "usage:organization:read"
     DOCUMENT_READ = "document:read"
@@ -58,7 +59,7 @@ class PolicyDenied(ApiError):
 def role_allows(subject: Subject, action: Action) -> bool:
     if subject.role not in set(Role):
         return False
-    if action == Action.USAGE_ORGANIZATION_READ:
+    if action in {Action.AUDIT_READ, Action.USAGE_ORGANIZATION_READ}:
         return subject.role in {
             Role.PLATFORM_ADMIN,
             Role.TENANT_ADMIN,
