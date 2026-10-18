@@ -1,3 +1,5 @@
+> Python candidate update: email-verified individual/organization signup is documented in [verified signup](docs/verified-signup.md). The legacy `/auth/register` contract below is TypeScript/history only; Python returns 410 by default. SMTP delivery defaults disabled until configured. Existing accounts keep their logins and tenant ownership.
+
 # Virexa Backend
 
 Enterprise API foundation for Virexa.

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
@@ -26,6 +28,9 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
+    account_type: Literal["individual", "organization"] | None = Field(
+        default=None, alias="accountType"
+    )
     model_config = ConfigDict(extra="forbid")
 
     email: EmailStr

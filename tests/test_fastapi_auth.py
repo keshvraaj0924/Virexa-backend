@@ -21,9 +21,11 @@ PASSWORD = "a-real-long-test-password"
 async def app(tmp_path):
     application = create_app(
         Settings(
+            environment="test",
+            allow_legacy_registration=True,
             database_url=os.environ.get(
                 "TEST_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/test.db"
-            )
+            ),
         )
     )
     async with application.state.engine.begin() as connection:
@@ -217,6 +219,9 @@ async def test_validation_does_not_echo_password_or_accept_role(app):
 
 @pytest.mark.asyncio
 async def test_production_cookie_flags(tmp_path):
+    from app.domain.auth.schemas import RegisterRequest
+    from app.domain.auth.service import register
+
     application = create_app(
         Settings(
             database_url=f"sqlite+aiosqlite:///{tmp_path}/prod.db",
@@ -226,18 +231,25 @@ async def test_production_cookie_flags(tmp_path):
     )
     async with application.state.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+    # Seed a legacy account directly; production HTTP registration stays disabled.
+    async with application.state.session_factory() as db:
+        await register(
+            db,
+            RegisterRequest(
+                displayName="Ada",
+                email="ada@example.com",
+                password=PASSWORD,
+                organizationName="Example",
+            ),
+            3600,
+        )
     async with client(application) as c:
         response = await c.post(
-            "/api/v1/auth/register",
+            "/api/v1/auth/login",
             headers={"Origin": "https://virexa.example"},
-            json={
-                "displayName": "Ada",
-                "email": "ada@example.com",
-                "password": PASSWORD,
-                "organizationName": "Example",
-            },
+            json={"email": "ada@example.com", "password": PASSWORD},
         )
-        assert response.status_code == 201
+        assert response.status_code == 200
         assert "Secure" in response.headers["set-cookie"]
         assert "HttpOnly" in response.headers["set-cookie"]
     await application.state.engine.dispose()

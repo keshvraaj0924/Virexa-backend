@@ -25,6 +25,7 @@ from app.core.policy import Action, capabilities
 from app.core.rbac import Role
 from app.db.base import get_db_session
 from app.db.models import Organization
+from app.domain.auth import signup
 from app.domain.auth.permissions import WIRE_ROLE_PERMISSIONS
 from app.domain.auth.schemas import LoginRequest, RegisterRequest
 from app.domain.auth.service import issue_session, register, session_payload
@@ -68,6 +69,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await engine.dispose()
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.state.signup_delivery = (
+        signup.SyntheticCaptureDelivery()
+        if settings.signup_email_delivery == "capture"
+        else signup.LocalSmtpDelivery(settings.signup_smtp_port)
+        if settings.signup_email_delivery == "local_smtp"
+        else signup.SmtpDelivery(settings)
+        if settings.signup_email_delivery == "smtp"
+        else signup.UnavailableDelivery()
+    )
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -140,7 +150,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError):
-        headers = {"Retry-After": "300"} if exc.status == 429 else None
+        headers = (
+            {"Retry-After": "60" if exc.code == "SIGNUP_COOLDOWN" else "300"}
+            if exc.status == 429
+            else None
+        )
         return JSONResponse(
             error_response(request, exc.code, exc.message), status_code=exc.status, headers=headers
         )
@@ -216,7 +230,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response: Response,
         db: AsyncSession = Depends(get_db_session),
     ):
+        if not settings.allow_legacy_registration:
+            raise ApiError(410, "VERIFIED_SIGNUP_REQUIRED", "Use email-verified signup.")
         token, payload = await register(db, data, settings.session_ttl_seconds)
+        set_cookie(response, token)
+        return success_response(request, payload)
+
+    @app.post(
+        settings.api_prefix + "/auth/signup/start",
+        status_code=202,
+        dependencies=[Depends(auth_attempt)],
+    )
+    async def start_signup(
+        data: signup.StartSignup, request: Request, db: AsyncSession = Depends(get_db_session)
+    ):
+        return success_response(request, await signup.start(db, data, app.state.signup_delivery))
+
+    @app.post(settings.api_prefix + "/auth/signup/verify", dependencies=[Depends(auth_attempt)])
+    async def verify_signup(
+        data: signup.VerifySignup, request: Request, db: AsyncSession = Depends(get_db_session)
+    ):
+        return success_response(request, await signup.verify(db, data))
+
+    @app.post(
+        settings.api_prefix + "/auth/signup/complete",
+        status_code=201,
+        dependencies=[Depends(auth_attempt)],
+    )
+    async def complete_signup(
+        data: signup.CompleteSignup,
+        request: Request,
+        response: Response,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        token, payload = await signup.complete(db, data, settings.session_ttl_seconds)
         set_cookie(response, token)
         return success_response(request, payload)
 
@@ -232,6 +279,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
         if user.role not in {role.value for role in Role}:
             raise ApiError(403, "FORBIDDEN", "Invalid account role.")
+        selected_organization = await db.get(Organization, user.organization_id)
+        if (
+            data.account_type is not None
+            and selected_organization.account_type != data.account_type
+        ):
+            raise ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
         token, session = await issue_session(
             db, user, settings.session_ttl_seconds, expected_password_hash=user.password_hash
         )
