@@ -8,9 +8,12 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api import success_response
+from app.core.auth_context import AuthContext
 from app.core.authentication import AuthenticationService
 from app.core.errors import ApiError
+from app.core.policy import Action, SessionAttributes, require_session
 from app.core.rbac import Role
+from app.core.session import SessionManager
 from app.db.base import get_db_session
 from app.db.models import Session, User
 
@@ -39,6 +42,22 @@ async def resolve_owner(request: Request, db: AsyncSession, *, lock: bool = Fals
     return user, session
 
 
+def subject(user: User) -> AuthContext:
+    return AuthContext(user.id, user.organization_id, Role(user.role))
+
+
+def authorize_session(user: User, action: Action, target: Session) -> None:
+    require_session(
+        subject(user),
+        action,
+        SessionAttributes(
+            target.organization_id,
+            target.user_id,
+            SessionManager.is_active(target.expires_at, target.revoked_at),
+        ),
+    )
+
+
 def active_scope(user: User):
     return (
         Session.user_id == user.id,
@@ -60,6 +79,7 @@ async def inventory(
     db: AsyncSession = Depends(get_db_session),
 ):
     user, current = await resolve_owner(request, db)
+    authorize_session(user, Action.SESSION_READ, current)
     query = select(Session.id, Session.created_at, Session.expires_at).where(*active_scope(user))
     if cursor is not None:
         query = query.where(Session.id > cursor)
@@ -86,6 +106,7 @@ async def inventory(
 @router.post("/revoke-others", dependencies=[Depends(trusted_origin)])
 async def revoke_others(request: Request, db: AsyncSession = Depends(get_db_session)):
     user, current = await resolve_owner(request, db, lock=True)
+    authorize_session(user, Action.SESSION_REVOKE, current)
     result = await db.execute(
         update(Session)
         .where(*active_scope(user), Session.id != current.id)
@@ -105,6 +126,13 @@ async def revoke_one(
     db: AsyncSession = Depends(get_db_session),
 ):
     user, current = await resolve_owner(request, db, lock=True)
+    authorize_session(user, Action.SESSION_REVOKE, current)
+    target = await db.scalar(
+        select(Session).where(*active_scope(user), Session.id == session_id)
+    )
+    if target is None:
+        raise ApiError(404, "NOT_FOUND", "Active session was not found.")
+    authorize_session(user, Action.SESSION_REVOKE, target)
     # Owner predicate is in SQL. Foreign, stale and nonexistent IDs share one response.
     result = await db.execute(
         update(Session)

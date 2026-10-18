@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -5,6 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authentication import AuthenticationService
+from app.core.policy import Action, require_action
 from app.core.rbac import Permission, Role, has_permission
 from app.db.base import get_db_session
 
@@ -52,6 +54,14 @@ def require_permission(permission: Permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
             )
+        return context
+
+    return dependency
+
+
+def require_capability(action: Action) -> Callable[..., Awaitable[AuthContext]]:
+    async def dependency(context: AuthContext = Depends(get_auth_context)) -> AuthContext:
+        require_action(context, action)
         return context
 
     return dependency

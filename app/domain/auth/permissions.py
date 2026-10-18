@@ -5,6 +5,7 @@ policy. Unported endpoints remain unavailable.
 """
 
 WIRE_ROLE_PERMISSIONS: dict[str, list[str]] = {
+    "auditor": [],  # No implemented Node-compatible permissions; see /me/permissions.
     "super_admin": [
         "platform:read",
         "platform:manage",
