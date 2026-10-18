@@ -24,6 +24,8 @@ PDF = b"%PDF-1.4\nSynthetic intake fixture only.\n%%EOF"
 async def app(tmp_path):
     app = create_app(
         Settings(
+            environment="test",
+            allow_legacy_registration=True,
             database_url=os.environ.get(
                 "DOCUMENT_TEST_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/docs.db"
             ),

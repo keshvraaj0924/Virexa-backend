@@ -87,6 +87,7 @@ def session_payload(user: User, organization: Organization, session: Session) ->
             "email": user.email,
             "displayName": user.display_name,
             "role": wire_roles.get(role, role.value),
+            "accountType": organization.account_type,
             "organizationId": str(organization.id),
             "organizationName": organization.name,
         },
