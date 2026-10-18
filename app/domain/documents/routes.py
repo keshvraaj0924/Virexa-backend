@@ -11,9 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api import success_response
-from app.core.auth_context import AuthContext, require_permission
+from app.core.auth_context import AuthContext, require_capability
 from app.core.errors import ApiError
-from app.core.rbac import Permission, Role
+from app.core.policy import Action, DocumentAttributes, require_action, require_document
 from app.db.base import get_db_session
 from app.db.models import Organization
 from app.domain.documents.models import Document, Upload
@@ -32,8 +32,8 @@ from app.domain.documents.schemas import (
 from app.domain.documents.storage import QuarantineStorage
 
 router = APIRouter(prefix="/documents", tags=["documents"], responses=ERROR_RESPONSES)
-Read = Annotated[AuthContext, Depends(require_permission(Permission.DOCUMENT_READ))]
-Write = Annotated[AuthContext, Depends(require_permission(Permission.DOCUMENT_MANAGE))]
+Read = Annotated[AuthContext, Depends(require_capability(Action.DOCUMENT_READ))]
+Write = Annotated[AuthContext, Depends(require_capability(Action.DOCUMENT_UPLOAD))]
 DB = Annotated[AsyncSession, Depends(get_db_session)]
 Key = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)]
 
@@ -114,7 +114,12 @@ async def document(
     row = await db.scalar(query.with_for_update() if lock else query)
     if row is None:
         raise ApiError(404, "NOT_FOUND", "Document was not found.")
+    require_document(context, Action.DOCUMENT_READ, attributes(row))
     return row
+
+
+def attributes(row: Document) -> DocumentAttributes:
+    return DocumentAttributes(row.organization_id, row.status, row.scan_status)
 
 
 async def attempt(
@@ -141,6 +146,7 @@ async def attempt(
     dependencies=[Depends(origin), Depends(upload_slot)],
 )
 async def create(data: CreateDocument, request: Request, context: Write, db: DB):
+    require_action(context, Action.DOCUMENT_CREATE)
     if data.branchId or data.departmentId:
         raise ApiError(
             409, "HIERARCHY_UNAVAILABLE", "Branch and department intake is not implemented."
@@ -262,6 +268,7 @@ async def initiate(document_id: UUID, request: Request, context: Write, db: DB, 
     if row and row.document_id != doc.id:
         raise ApiError(409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key belongs to another request.")
     if row is None:
+        require_document(context, Action.DOCUMENT_UPLOAD, attributes(doc))
         existing = await db.scalar(
             select(Upload.id).where(
                 Upload.organization_id == context.organization_id, Upload.document_id == doc.id
@@ -279,14 +286,18 @@ async def initiate(document_id: UUID, request: Request, context: Write, db: DB, 
         )
         db.add(row)
         try:
-            await db.commit()
+            await db.flush()
         except IntegrityError:
             await db.rollback()
             raise ApiError(409, "UPLOAD_CONFLICT", "Retry the original upload request.") from None
+    if row.status != "completed":
+        require_document(context, Action.DOCUMENT_UPLOAD, attributes(doc))
+        if row.status != "initiated":
+            raise ApiError(409, "UPLOAD_NOT_WRITABLE", "Upload attempt is not writable.")
     if aware(row.expires_at) <= now() and row.status != "completed":
         # The same authenticated request can renew its unfinished attempt; no new object.
         row.expires_at = now() + timedelta(minutes=15)
-        await db.commit()
+    await db.commit()
     base = request.app.state.settings.public_api_origin
     url = (
         f"{base}{request.app.state.settings.api_prefix}/documents/{doc.id}/uploads/{row.id}/content"
@@ -315,6 +326,7 @@ async def upload_content(
 ):
     doc = await document(db, context, document_id, lock=True)
     row = await attempt(db, context, document_id, attempt_id)
+    require_document(context, Action.DOCUMENT_UPLOAD, attributes(doc))
     adapter = storage(request)
     if aware(row.expires_at) <= now() or row.status != "initiated":
         raise ApiError(
@@ -350,6 +362,10 @@ async def complete(document_id: UUID, attempt_id: UUID, request: Request, contex
     row = await attempt(db, context, document_id, attempt_id)
     adapter = storage(request)
     replayed = row.status == "completed"
+    if not replayed:
+        require_document(context, Action.DOCUMENT_UPLOAD, attributes(doc))
+        if row.status != "initiated" or aware(row.expires_at) <= now():
+            raise ApiError(409, "UPLOAD_NOT_WRITABLE", "Upload attempt is expired or not writable.")
     if not row.bytes_verified:
         raise ApiError(409, "UPLOAD_INCOMPLETE", "Verified upload bytes are required.")
     try:
@@ -379,13 +395,9 @@ async def complete(document_id: UUID, attempt_id: UUID, request: Request, contex
 async def extract(
     document_id: UUID, data: CreateExtraction, request: Request, context: Write, db: DB, key: Key
 ):
-    if context.role == Role.OPERATOR:
-        raise ApiError(403, "FORBIDDEN", "Extraction management permission is required.")
+    require_action(context, Action.EXTRACTION_REQUEST)
     doc = await document(db, context, document_id)
-    if doc.scan_status != "clean":
-        raise ApiError(
-            409, "DOCUMENT_NOT_READY", "A verified upload and clean malware scan are required."
-        )
+    require_document(context, Action.EXTRACTION_REQUEST, attributes(doc))
     raise ApiError(503, "EXTRACTOR_UNAVAILABLE", "No extraction provider is configured.")
 
 

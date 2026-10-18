@@ -17,11 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from starlette.exceptions import HTTPException
 
 from app.core.api import error_response, success_response
-from app.core.auth_context import AuthContext, require_permission
+from app.core.auth_context import AuthContext, get_auth_context, require_capability
 from app.core.authentication import AuthenticationService
 from app.core.config import Settings, get_settings
 from app.core.errors import ApiError
-from app.core.rbac import Permission, Role
+from app.core.policy import Action, capabilities
+from app.core.rbac import Role
 from app.db.base import get_db_session
 from app.db.models import Organization
 from app.domain.auth.permissions import WIRE_ROLE_PERMISSIONS
@@ -259,6 +260,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise ApiError(403, "FORBIDDEN", "Account role is not supported by this API version.")
         return success_response(request, {**payload, "permissions": permissions})
 
+    @app.get(settings.api_prefix + "/me/permissions")
+    async def effective_permissions(
+        request: Request, context: AuthContext = Depends(get_auth_context)
+    ):
+        return success_response(request, {"capabilities": capabilities(context)})
+
     @app.post(settings.api_prefix + "/auth/logout", dependencies=[Depends(trusted_origin)])
     async def logout(
         request: Request, response: Response, db: AsyncSession = Depends(get_db_session)
@@ -279,7 +286,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def organization(
         organization_id: UUID,
         request: Request,
-        context: AuthContext = Depends(require_permission(Permission.USER_READ)),
+        context: AuthContext = Depends(require_capability(Action.ORGANIZATION_READ)),
         db: AsyncSession = Depends(get_db_session),
     ):
         # Tenant predicate lives in the database query, not a post-fetch filter.
